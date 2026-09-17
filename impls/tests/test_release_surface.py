@@ -50,7 +50,6 @@ def test_release_has_only_paper_experiment_launchers():
         'train_action-prior-chunk_visual_ogbench8.sh',
         'train_latent_path_flow_visual_ogbench8.sh',
         'train_lewmpp_lerobot_v3.sh',
-        'eval_lewmpp_lerobot_v3_offline.sh',
         'eval_lewmpp_visual_ogbench8.sh',
         'eval_lewm_baseline_visual_ogbench8.sh',
     }
@@ -152,17 +151,16 @@ def test_lerobot_v3_launcher_runs_the_complete_rectangular_image_pipeline():
         assert value in text
 
 
-def test_lerobot_v3_offline_evaluation_uses_final_checkpoints_and_shared_split():
-    text = (ROOT / 'experiments' / 'eval' / 'eval_lewmpp_lerobot_v3_offline.sh').read_text()
+def test_lerobot_v3_robot_api_is_documented_with_final_checkpoints():
+    text = (ROOT / 'README.md').read_text()
     for value in (
         'weights_epoch_50.msgpack',
-        '--action-prior-step=100000',
+        'action_prior_step=100000',
         'checkpoint_100000.msgpack',
-        '--train-fraction=0.96',
-        '--split-seed=0',
-        '--action-prior-samples=10000',
-        '--flow-validation-pairs=10000',
-        'offline_metrics.json',
+        'plan_action_chunk(recent_frames, goal_image)',
+        'policy.act(frame)',
+        'left_joint_0',
+        'right_gripper',
     ):
         assert value in text
 
@@ -224,7 +222,6 @@ def test_python_entrypoints_match_the_release_pipeline():
         'train_action_prior_ogbench.py',
         'train_latent_path_flow_ogbench.py',
         'eval_visual_ogbench.py',
-        'eval_lerobot_v3_offline.py',
     }
 
 

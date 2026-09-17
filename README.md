@@ -161,22 +161,65 @@ outputs/
     └── latent_path_flow/checkpoint_100000.msgpack
 ```
 
-This is the offline real-robot-data training pipeline. Deployment on a robot
-also requires a robot-specific runtime that supplies live `camera_h` and goal
-images with the identical long-edge resize, maps the predicted 14-dimensional
-action chunks to the robot SDK, and enforces hardware safety limits.
+This is the offline real-robot-data training pipeline. The real-robot API below
+loads the Lance dataset only to restore the training action normalization and
+bounds; the latent cache is not needed for deployment.
 
-After training, evaluate all three learned components on the held-out episodes:
+### Real-robot inference and evaluation
 
-```bash
-bash experiments/eval/eval_lewmpp_lerobot_v3_offline.sh
+The deployment API accepts raw `camera_h` frames and a desired-goal image. It
+applies the same RGB conversion and 480 x 640 to 168 x 224 long-edge resize
+used in training. The most direct interface takes several recent frames,
+ordered from oldest to newest, and returns the next `10 x 14` action chunk:
+
+```python
+from real_robot_lewmpp import RealRobotLeWMPPPolicy
+
+policy = RealRobotLeWMPPPolicy(
+    lance_path="outputs/data/push_multi_red_cube/push_multi_red_cube.lance",
+    lewm_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack",
+    action_prior_dir="outputs/train/lerobot_v3/push_multi_red_cube/action_prior",
+    action_prior_step=100000,
+    latent_path_flow_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_100000.msgpack",
+    input_color="rgb",
+)
+
+recent_frames = [camera_h_t_minus_2, camera_h_t_minus_1, camera_h_t]
+actions = policy.plan_action_chunk(recent_frames, goal_image)  # (10, 14)
+for action in actions:
+    robot.send_action(action)
 ```
 
-The evaluator independently reports LeWM latent-prediction error, normalized
-Action Chunk Prior prediction error, and LatentPathFlow waypoint metrics in
-`outputs/eval/lerobot_v3/push_multi_red_cube/offline_metrics.json`. These are
-offline checkpoint and generalization metrics, not real-robot task success;
-task success requires the robot-specific deployment runtime described above.
+The 14 columns preserve the dataset order exactly:
+
+```text
+left_joint_0, left_joint_1, left_joint_2, left_joint_3,
+left_joint_4, left_joint_5, left_gripper,
+right_joint_0, right_joint_1, right_joint_2, right_joint_3,
+right_joint_4, right_joint_5, right_gripper
+```
+
+For receding-horizon evaluation, call the streaming interface once for every
+new camera frame. It returns one action at a time and automatically replans
+after ten actions while retaining the incoming image history:
+
+```python
+policy.warmup(robot.get_camera_h(), goal_image)  # compile before enabling motion
+policy.reset(goal_image)
+while not robot.is_done():
+    frame = robot.get_camera_h()                 # RGB uint8, H x W x 3
+    action = policy.act(frame)                    # (14,), dataset order above
+    robot.send_action(action)
+```
+
+Run a robot program from the repository root with
+`PYTHONPATH=impls python your_robot_eval.py`. For OpenCV camera frames, construct
+the policy with `input_color="bgr"`. `warmup` performs JAX compilation but does
+not send its planned action to the robot. The API clips predictions to the
+per-dimension range observed in the 144 training episodes. The robot-side
+program must preserve the action order and dataset units and must still enforce
+collision checks, emergency stop handling, joint/velocity limits, the 20 Hz
+command rate, and all hardware-specific interlocks.
 
 ## Pretrained artifacts
 
