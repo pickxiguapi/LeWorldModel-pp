@@ -12,6 +12,16 @@ from lewm_jax.model import LeWM
 ARCHITECTURE = 'lewm_impala_small'
 
 
+def checkpoint_image_shape(config):
+    """Return the exact HWC input shape, including compatibility with older square checkpoints."""
+    image_size = int(config['image_size'])
+    return (
+        int(config.get('image_height', image_size)),
+        int(config.get('image_width', image_size)),
+        3,
+    )
+
+
 def load_frozen_lewm(checkpoint):
     """Restore a LeWM model and frozen variables from a checkpoint."""
     checkpoint = Path(checkpoint)

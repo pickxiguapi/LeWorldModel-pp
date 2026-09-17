@@ -49,6 +49,7 @@ def test_release_has_only_paper_experiment_launchers():
         'precompute_visual_ogbench8_latents.sh',
         'train_action-prior-chunk_visual_ogbench8.sh',
         'train_latent_path_flow_visual_ogbench8.sh',
+        'train_lewmpp_lerobot_v3.sh',
         'eval_lewmpp_visual_ogbench8.sh',
         'eval_lewm_baseline_visual_ogbench8.sh',
     }
@@ -120,6 +121,22 @@ def test_action_prior_training_launcher_records_release_hyperparameters():
         '--representation_mode=all',
     ):
         assert argument in text
+
+
+def test_lerobot_v3_launcher_runs_the_complete_rectangular_image_pipeline():
+    text = (ROOT / 'experiments' / 'train' / 'train_lewmpp_lerobot_v3.sh').read_text()
+    for value in (
+        'yaoxianze/push_multi_red_cube',
+        '5db612a1d18d4aa292fdbecb75a164c073ec0c82',
+        'observation.images.camera_h',
+        '--image-size=224',
+        '--resize-mode=long_edge',
+        'train_lewm_control.py',
+        'precompute_lewm_lance_latents.py',
+        'train_action_prior_chunk.py',
+        'train_latent_path_flow_lewm_control.py',
+    ):
+        assert value in text
 
 
 def test_paper_evaluations_explicitly_require_all_representation_sharing():

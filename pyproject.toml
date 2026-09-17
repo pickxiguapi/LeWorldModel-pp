@@ -47,6 +47,9 @@ dev = [
     "pytest",
     "ruff",
 ]
+robot = [
+    "lerobot == 0.4.3",
+]
 cuda12 = [
     "jax[cuda12] == 0.4.33; platform_system == 'Linux'",
 ]
@@ -55,7 +58,7 @@ all = [
 ]
 
 [project.urls]
-Home = "https://github.com/pickxiguapi/ogbench"
+Home = "https://github.com/pickxiguapi/LeWorldModel-pp"
 
 [tool.ruff]
 target-version = "py310"

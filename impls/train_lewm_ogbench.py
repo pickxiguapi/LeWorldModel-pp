@@ -7,7 +7,7 @@ import csv
 import json
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import flax
@@ -33,6 +33,8 @@ class LeWMConfig:
     decode_workers: int = 6
     train_fraction: float = 0.9
     image_size: int = 224
+    image_height: int = 224
+    image_width: int = 224
     embed_dim: int = 192
     history_size: int = 3
     num_preds: int = 1
@@ -203,6 +205,12 @@ def main():
             normalize_pixels=False,
             **dataset_kwargs,
         )
+    image_height, image_width, image_channels = dataset.observation_shape
+    if image_channels != 3 or max(image_height, image_width) != config.image_size:
+        raise ValueError(
+            f'Dataset images are {dataset.observation_shape}; expected RGB with long edge {config.image_size}.'
+        )
+    config = replace(config, image_height=image_height, image_width=image_width)
     output_dir = Path(args.save_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     with (output_dir / 'config.json').open('w') as file:

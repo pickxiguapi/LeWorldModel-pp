@@ -138,10 +138,13 @@ class LeWMLanceDataset:
         # column. Use it here too; Cube's final HDF5 actions are NaN while the
         # converted Lance table contains unused zero placeholders there.
         source_hdf5 = path.with_suffix('.h5')
-        if not source_hdf5.is_file():
-            raise FileNotFoundError(f'Original HDF5 dataset is required for action statistics: {source_hdf5}')
-        with h5py.File(source_hdf5, 'r') as h5_file:
-            reference_actions = h5_file['action'][...].astype(np.float32, copy=False)
+        if source_hdf5.is_file():
+            with h5py.File(source_hdf5, 'r') as h5_file:
+                reference_actions = h5_file['action'][...].astype(np.float32, copy=False)
+        else:
+            valid_action_rows = np.ones(len(all_actions), dtype=bool)
+            valid_action_rows[episode_offsets + episode_lengths - 1] = False
+            reference_actions = all_actions[valid_action_rows]
         self.actions, self.action_mean, self.action_std = _standardize_actions(
             all_actions[start:stop], reference_actions
         )

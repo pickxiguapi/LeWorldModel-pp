@@ -109,10 +109,12 @@ def initialize_partial_cache(
     checkpoint_metadata,
 ):
     import h5py
+    from lewm_jax.checkpoints import checkpoint_image_shape
 
     observations = arrays['observations']
     episode_idx, step_idx, offsets, lengths = layout
     embed_dim = int(checkpoint_metadata['config']['embed_dim'])
+    image_height, image_width, _ = checkpoint_image_shape(checkpoint_metadata['config'])
     output_dtype = np.dtype(args.output_dtype)
     with h5py.File(path, 'w') as output:
         for name, values in arrays.items():
@@ -142,6 +144,8 @@ def initialize_partial_cache(
         output.attrs['architecture'] = str(checkpoint_metadata['config']['architecture'])
         output.attrs['embed_dim'] = embed_dim
         output.attrs['image_size'] = int(checkpoint_metadata['config']['image_size'])
+        output.attrs['image_height'] = image_height
+        output.attrs['image_width'] = image_width
         output.attrs['history_size'] = int(checkpoint_metadata['config']['history_size'])
         output.attrs['z_dtype'] = output_dtype.name
         output.attrs['encoded_rows'] = 0
@@ -222,16 +226,16 @@ def main():
     archive, arrays, layout = load_npz_source(source_path)
     observations = arrays['observations']
     try:
-        from lewm_jax.checkpoints import load_frozen_lewm
+        from lewm_jax.checkpoints import checkpoint_image_shape, load_frozen_lewm
 
         print(f'Loading checkpoint: {checkpoint_path}', flush=True)
         checkpoint_sha256 = sha256_file(checkpoint_path)
         model, variables, metadata = load_frozen_lewm(checkpoint_path)
         embed_dim = int(metadata['config']['embed_dim'])
-        image_size = int(metadata['config']['image_size'])
-        if observations.shape[1:] != (image_size, image_size, 3):
+        expected_image_shape = checkpoint_image_shape(metadata['config'])
+        if observations.shape[1:] != expected_image_shape:
             raise ValueError(
-                f'Checkpoint expects {(image_size, image_size, 3)}, '
+                f'Checkpoint expects {expected_image_shape}, '
                 f'but observations are {observations.shape[1:]}.'
             )
 

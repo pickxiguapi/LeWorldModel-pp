@@ -105,6 +105,47 @@ Visual OGBench training artifacts are written below `EXPERIMENT_ROOT/train/`.
 Set the evaluation launchers' checkpoint-root variables to the corresponding
 training directories when evaluating your own models.
 
+### LeRobot v3 real-robot datasets
+
+Install the LeRobot dataset adapter in the same environment:
+
+```bash
+uv sync --extra train --extra robot --extra dev
+source .venv/bin/activate
+```
+
+The example launcher trains LeWM++ from the LeRobotDataset v3.0 dataset
+[`yaoxianze/push_multi_red_cube`](https://huggingface.co/datasets/yaoxianze/push_multi_red_cube).
+Open `experiments/train/train_lewmpp_lerobot_v3.sh` and fill in
+`LEROBOT_DATA_ROOT` with a local directory for the downloaded LeRobot data.
+Then run:
+
+```bash
+bash experiments/train/train_lewmpp_lerobot_v3.sh
+```
+
+The launcher pins the source dataset revision and uses
+`observation.images.camera_h`. Its 480 x 640 RGB frames are resized without
+cropping or distortion: the aspect ratio is preserved and the long edge is
+set to 224, producing 168 x 224 training frames. It then runs the complete
+offline training dependency chain:
+
+1. convert the selected LeRobot camera and 14-dimensional actions to a
+   JPEG-backed Lance trajectory dataset;
+2. train the frozen LeWM encoder and dynamics model;
+3. precompute checkpoint-bound LeWM latents;
+4. train the Action Chunk Prior and full-future LatentPathFlow.
+
+Converted data is written to `outputs/data/push_multi_red_cube/`. Checkpoints,
+the latent cache, and logs are written below
+`outputs/train/lerobot_v3/push_multi_red_cube/`. Change `EXPERIMENT_ROOT` in
+the launcher to place all generated artifacts elsewhere.
+
+This is the offline real-robot-data training pipeline. Deployment on a robot
+also requires a robot-specific runtime that supplies live `camera_h` and goal
+images with the identical long-edge resize, maps the predicted 14-dimensional
+action chunks to the robot SDK, and enforces hardware safety limits.
+
 ## Pretrained artifacts
 
 The exact checkpoints selected for the release evaluation are stored in

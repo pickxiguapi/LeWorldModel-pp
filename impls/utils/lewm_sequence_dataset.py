@@ -84,6 +84,9 @@ class LeWMSequenceDataset:
 
         episode_ids = np.concatenate(episode_chunks).astype(np.int64, copy=False)
         lance_actions = np.concatenate(action_chunks).astype(np.float32, copy=False)
+        first_pixels = self._pixel_rows.__getitems__([0])
+        first_blob = first_pixels.column(first_pixels.schema.get_field_index('pixels'))[0].as_py()
+        self.observation_shape = tuple(self._decode(first_blob).shape)
         changes = np.flatnonzero(np.diff(episode_ids) != 0) + 1
         offsets = np.concatenate([[0], changes]).astype(np.int64)
         lengths = np.diff(np.concatenate([offsets, [len(episode_ids)]])).astype(np.int64)

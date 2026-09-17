@@ -29,7 +29,7 @@ FORMAT_VERSION = 1
 
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--task', choices=('cube', 'pusht', 'reacher', 'tworoom'), required=True)
+    parser.add_argument('--task', required=True)
     parser.add_argument('--lance-path', required=True)
     parser.add_argument('--checkpoint', required=True)
     parser.add_argument('--output', required=True)
@@ -218,10 +218,12 @@ def initialize_partial_cache(
     checkpoint_metadata,
 ):
     import h5py
+    from lewm_jax.checkpoints import checkpoint_image_shape
 
     source_hdf5 = reader.path.with_suffix('.h5')
     output_dtype = np.dtype(args.output_dtype)
     embed_dim = int(checkpoint_metadata['config']['embed_dim'])
+    image_height, image_width, _ = checkpoint_image_shape(checkpoint_metadata['config'])
     with h5py.File(partial_path, 'w') as output:
         copy_non_pixel_hdf5(source_hdf5, output)
         output.attrs['format'] = 'lewm_latent_dataset'
@@ -239,6 +241,8 @@ def initialize_partial_cache(
         output.attrs['architecture'] = str(checkpoint_metadata['config']['architecture'])
         output.attrs['embed_dim'] = embed_dim
         output.attrs['image_size'] = int(checkpoint_metadata['config']['image_size'])
+        output.attrs['image_height'] = image_height
+        output.attrs['image_width'] = image_width
         output.attrs['history_size'] = int(checkpoint_metadata['config']['history_size'])
         output.attrs['z_dtype'] = output_dtype.name
         output.attrs['encoded_rows'] = 0
@@ -360,13 +364,13 @@ def main():
     output_path = Path(args.output).expanduser().resolve()
     partial_path = output_path.with_name(output_path.name + '.incomplete')
 
-    from lewm_jax.checkpoints import load_frozen_lewm
+    from lewm_jax.checkpoints import checkpoint_image_shape, load_frozen_lewm
 
     print(f'Loading checkpoint: {checkpoint_path}', flush=True)
     checkpoint_sha256 = sha256_file(checkpoint_path)
     model, variables, checkpoint_metadata = load_frozen_lewm(checkpoint_path)
     embed_dim = int(checkpoint_metadata['config']['embed_dim'])
-    image_size = int(checkpoint_metadata['config']['image_size'])
+    expected_image_shape = checkpoint_image_shape(checkpoint_metadata['config'])
 
     import jax
 
@@ -400,9 +404,9 @@ def main():
                 on_batch=collect_smoke,
             )
             values = np.concatenate(all_latents)
-            if observed_shapes != {(image_size, image_size, 3)}:
+            if observed_shapes != {expected_image_shape}:
                 raise ValueError(
-                    f'Image shape mismatch: checkpoint expects {(image_size, image_size, 3)}, '
+                    f'Image shape mismatch: checkpoint expects {expected_image_shape}, '
                     f'observed {sorted(observed_shapes)}.'
                 )
             print(
@@ -475,9 +479,9 @@ def main():
 
             def write_batch(batch_start, batch_stop, pixels, latents):
                 nonlocal batch_counter
-                if pixels.shape[1:] != (image_size, image_size, 3):
+                if pixels.shape[1:] != expected_image_shape:
                     raise ValueError(
-                        f'Checkpoint expects images {(image_size, image_size, 3)}, '
+                        f'Checkpoint expects images {expected_image_shape}, '
                         f'but rows [{batch_start}, {batch_stop}) are {pixels.shape[1:]}.'
                     )
                 z[batch_start:batch_stop] = latents.astype(args.output_dtype)
