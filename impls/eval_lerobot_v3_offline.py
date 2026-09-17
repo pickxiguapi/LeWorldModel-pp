@@ -30,6 +30,47 @@ def parse_args():
     return parser.parse_args()
 
 
+def validate_protocol(args):
+    import flax
+
+    lewm_payload = flax.serialization.msgpack_restore(Path(args.lewm_checkpoint).expanduser().read_bytes())
+    lewm_config = lewm_payload['config']
+    action_flags = json.loads((Path(args.action_prior_dir).expanduser() / 'flags.json').read_text())
+    flow_config = json.loads((Path(args.latent_path_flow_checkpoint).expanduser().parent / 'config.json').read_text())
+    expected_validation_fraction = 1.0 - args.train_fraction
+    if not lewm_config.get('episode_split'):
+        raise ValueError('LeWM checkpoint was not trained with an episode-level split.')
+    if not np.isclose(float(lewm_config['train_fraction']), args.train_fraction):
+        raise ValueError('LeWM checkpoint train fraction does not match evaluation.')
+    if int(lewm_config['split_seed']) != args.split_seed:
+        raise ValueError('LeWM checkpoint split seed does not match evaluation.')
+    if not np.isclose(float(action_flags['validation_fraction']), expected_validation_fraction):
+        raise ValueError('Action Prior validation fraction does not match evaluation.')
+    if int(action_flags['episode_split_seed']) != args.split_seed:
+        raise ValueError('Action Prior split seed does not match evaluation.')
+    if not np.isclose(float(flow_config['train_fraction']), args.train_fraction):
+        raise ValueError('LatentPathFlow train fraction does not match evaluation.')
+    if int(flow_config['split_seed']) != args.split_seed:
+        raise ValueError('LatentPathFlow split seed does not match evaluation.')
+
+    frameskip = int(lewm_config['frameskip'])
+    chunk_size = int(action_flags['agent']['chunk_size'])
+    action_block = int(flow_config['action_block'])
+    subgoal_steps = int(flow_config['subgoal_steps'])
+    if not frameskip == chunk_size == action_block:
+        raise ValueError(
+            f'Temporal mismatch: frameskip={frameskip}, chunk_size={chunk_size}, action_block={action_block}.'
+        )
+    if subgoal_steps % action_block:
+        raise ValueError('LatentPathFlow subgoal_steps must be divisible by action_block.')
+    return {
+        'frameskip': frameskip,
+        'chunk_size': chunk_size,
+        'action_block': action_block,
+        'subgoal_steps': subgoal_steps,
+    }
+
+
 def evaluate_lewm(args):
     from lewm_jax import load_frozen_lewm
     from utils.lewm_sequence_dataset import LeWMSequenceDataset
@@ -157,7 +198,7 @@ def evaluate_latent_path_flow(args):
 
     cache = load_latent_cache(args.latent_dataset)
     model, params, config, step = load_checkpoint(args.latent_path_flow_checkpoint)
-    if float(config['train_fraction']) != args.train_fraction or int(config['split_seed']) != args.split_seed:
+    if not np.isclose(float(config['train_fraction']), args.train_fraction) or int(config['split_seed']) != args.split_seed:
         raise ValueError('LatentPathFlow checkpoint does not use the requested held-out episode split.')
     _, val_episodes = split_episodes(len(cache.episode_offsets), args.train_fraction, args.split_seed)
     val_t, val_final = build_valid_transitions(
@@ -204,12 +245,14 @@ def main():
     for name in ('batch_size', 'action_prior_samples', 'flow_validation_pairs', 'flow_batch_size'):
         if getattr(args, name) <= 0:
             raise ValueError(f'--{name.replace("_", "-")} must be positive.')
+    temporal = validate_protocol(args)
     results = {
         'protocol': {
             'dataset': 'yaoxianze/push_multi_red_cube',
             'train_fraction': args.train_fraction,
             'split_seed': args.split_seed,
             'eval_seed': args.eval_seed,
+            **temporal,
         },
         'lewm': evaluate_lewm(args),
         'action_prior': evaluate_action_prior(args),

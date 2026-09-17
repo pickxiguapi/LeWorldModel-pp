@@ -152,6 +152,21 @@ def test_lerobot_v3_launcher_runs_the_complete_rectangular_image_pipeline():
         assert value in text
 
 
+def test_lerobot_v3_offline_evaluation_uses_final_checkpoints_and_shared_split():
+    text = (ROOT / 'experiments' / 'eval' / 'eval_lewmpp_lerobot_v3_offline.sh').read_text()
+    for value in (
+        'weights_epoch_50.msgpack',
+        '--action-prior-step=100000',
+        'checkpoint_100000.msgpack',
+        '--train-fraction=0.96',
+        '--split-seed=0',
+        '--action-prior-samples=10000',
+        '--flow-validation-pairs=10000',
+        'offline_metrics.json',
+    ):
+        assert value in text
+
+
 def test_paper_evaluations_explicitly_require_all_representation_sharing():
     for path in (ROOT / 'experiments' / 'eval').glob('eval_*.sh'):
         text = path.read_text()

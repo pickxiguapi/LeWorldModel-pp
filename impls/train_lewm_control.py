@@ -285,6 +285,11 @@ def main():
     print(f'encoder={config.encoder}')
     print(f'dataset={args.dataset_path}')
     print(f'clips train={len(dataset.train_indices)} val={len(dataset.val_indices)}')
+    if dataset.train_episode_indices is not None:
+        print(
+            f'episodes train={len(dataset.train_episode_indices)} '
+            f'val={len(dataset.val_episode_indices)} split_seed={config.split_seed}'
+        )
     print(f'steps_per_epoch={steps_per_epoch} total_steps={total_steps} scheduler_warmup_steps={warmup_steps}')
     print(f'parameters={parameter_count:,} devices={jax.devices()}')
 

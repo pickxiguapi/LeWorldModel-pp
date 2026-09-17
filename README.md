@@ -148,7 +148,18 @@ episodes), so no episode contributes clips to both training and validation.
 Converted data is written to `outputs/data/push_multi_red_cube/`. Checkpoints,
 the latent cache, and logs are written below
 `outputs/train/lerobot_v3/push_multi_red_cube/`. Change `EXPERIMENT_ROOT` in
-the launcher to place all generated artifacts elsewhere.
+both launchers to place all generated artifacts elsewhere. The final files
+consumed by evaluation are:
+
+```text
+outputs/
+├── data/push_multi_red_cube/push_multi_red_cube.lance/
+└── train/lerobot_v3/push_multi_red_cube/
+    ├── lewm/weights_epoch_50.msgpack
+    ├── lewm_latents.h5
+    ├── action_prior/params_100000.pkl
+    └── latent_path_flow/checkpoint_100000.msgpack
+```
 
 This is the offline real-robot-data training pipeline. Deployment on a robot
 also requires a robot-specific runtime that supplies live `camera_h` and goal
