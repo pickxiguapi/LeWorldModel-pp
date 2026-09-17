@@ -43,6 +43,7 @@ def parse_args():
     parser.add_argument('--alpha', type=float, default=3.0)
     parser.add_argument('--p_aug', type=float, default=0.0)
     parser.add_argument('--validation_fraction', type=float, default=0.05)
+    parser.add_argument('--episode_split_seed', type=int)
     parser.add_argument('--representation_mode', choices=tuple(REPRESENTATION_MODES), default='all')
     return parser.parse_args()
 
@@ -87,6 +88,7 @@ def main():
         args.env_name or 'dataset-only',
         dataset_path=args.dataset_path,
         validation_fraction=args.validation_fraction,
+        episode_split_seed=args.episode_split_seed,
     )
     if not getattr(train_base, 'lazy', False):
         train_base = Dataset.create(**train_base)
@@ -146,6 +148,8 @@ def main():
         'lewm_checkpoint_sha256': lewm_sha256,
         'train_steps': args.train_steps,
         'seed': args.seed,
+        'episode_split_seed': args.episode_split_seed,
+        'validation_fraction': args.validation_fraction,
         'agent': dict(config),
         'representation': {
             'mode': args.representation_mode,

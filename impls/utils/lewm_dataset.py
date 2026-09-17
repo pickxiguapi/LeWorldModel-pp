@@ -9,6 +9,8 @@ import h5py
 import numpy as np
 from PIL import Image
 
+from utils.episode_splits import split_episode_indices
+
 try:
     import hdf5plugin  # noqa: F401  # Register the source HDF5 Blosc filter.
 except ImportError as exc:  # pragma: no cover
@@ -36,14 +38,15 @@ def _standardize_actions(actions, reference_actions):
 class LazyLancePixelArray:
     """Array-like random access to a JPEG pixel column in Lance."""
 
-    def __init__(self, table, start, stop):
+    def __init__(self, table, rows):
         from lancedb.permutation import Permutation
 
-        self.start = int(start)
-        self.stop = int(stop)
+        self.rows = np.asarray(rows, dtype=np.int64)
+        if self.rows.ndim != 1 or not len(self.rows):
+            raise ValueError('Pixel rows must be a non-empty one-dimensional array.')
         self._permutation = Permutation.identity(table).select_columns(['pixels']).with_format('arrow')
-        first = self._decode(self._fetch([self.start])[0])
-        self.shape = (self.stop - self.start, *first.shape)
+        first = self._decode(self._fetch([self.rows[0]])[0])
+        self.shape = (len(self.rows), *first.shape)
         self.dtype = first.dtype
 
     def __len__(self):
@@ -72,7 +75,7 @@ class LazyLancePixelArray:
         if np.any((flat < 0) | (flat >= len(self))):
             raise IndexError('Pixel index out of range.')
 
-        absolute = flat + self.start
+        absolute = self.rows[flat]
         unique, inverse = np.unique(absolute, return_inverse=True)
         decoded = np.stack([self._decode(blob) for blob in self._fetch(unique)])
         values = decoded[inverse].reshape((*indices.shape, *self.shape[1:]))
@@ -84,7 +87,7 @@ class LeWMLanceDataset:
 
     lazy = True
 
-    def __init__(self, lance_path, split, validation_fraction=0.05):
+    def __init__(self, lance_path, split, validation_fraction=0.05, episode_split_seed=None):
         import lancedb
         import pyarrow as pa
 
@@ -116,23 +119,31 @@ class LeWMLanceDataset:
         episode_offsets = np.concatenate([[0], changes]).astype(np.int64)
         episode_lengths = np.diff(np.concatenate([episode_offsets, [len(episode_ids)]])).astype(np.int64)
 
-        split_episode = int(len(episode_offsets) * (1 - validation_fraction))
-        split_episode = min(max(split_episode, 1), len(episode_offsets) - 1)
-        if split == 'train':
-            selected_offsets = episode_offsets[:split_episode]
-            selected_lengths = episode_lengths[:split_episode]
-            start, stop = 0, int(episode_offsets[split_episode])
-        elif split == 'val':
-            selected_offsets = episode_offsets[split_episode:]
-            selected_lengths = episode_lengths[split_episode:]
-            start, stop = int(episode_offsets[split_episode]), len(episode_ids)
-        else:
+        if split not in ('train', 'val'):
             raise ValueError(f'Unknown split: {split}')
+        if episode_split_seed is None:
+            split_episode = int(len(episode_offsets) * (1 - validation_fraction))
+            split_episode = min(max(split_episode, 1), len(episode_offsets) - 1)
+            episode_groups = (
+                np.arange(split_episode, dtype=np.int64),
+                np.arange(split_episode, len(episode_offsets), dtype=np.int64),
+            )
+        else:
+            episode_groups = split_episode_indices(
+                len(episode_offsets), 1.0 - validation_fraction, episode_split_seed
+            )
+        selected_episodes = np.sort(episode_groups[0 if split == 'train' else 1])
+        selected_lengths = episode_lengths[selected_episodes]
+        selected_rows = np.concatenate(
+            [
+                np.arange(episode_offsets[episode], episode_offsets[episode] + episode_lengths[episode])
+                for episode in selected_episodes
+            ]
+        ).astype(np.int64)
 
-        self.start = start
-        self.stop = stop
-        self.size = stop - start
-        self.observations = LazyLancePixelArray(table, start, stop)
+        self.selected_episode_indices = selected_episodes
+        self.size = len(selected_rows)
+        self.observations = LazyLancePixelArray(table, selected_rows)
 
         # eval_ff.py fits StandardScaler on the original full HDF5 action
         # column. Use it here too; Cube's final HDF5 actions are NaN while the
@@ -140,16 +151,29 @@ class LeWMLanceDataset:
         source_hdf5 = path.with_suffix('.h5')
         if source_hdf5.is_file():
             with h5py.File(source_hdf5, 'r') as h5_file:
-                reference_actions = h5_file['action'][...].astype(np.float32, copy=False)
+                source_actions = h5_file['action'][...].astype(np.float32, copy=False)
+            reference_actions = source_actions
         else:
+            source_actions = all_actions
             valid_action_rows = np.ones(len(all_actions), dtype=bool)
             valid_action_rows[episode_offsets + episode_lengths - 1] = False
             reference_actions = all_actions[valid_action_rows]
+        if episode_split_seed is not None:
+            stats_rows = np.concatenate(
+                [
+                    np.arange(
+                        episode_offsets[episode],
+                        episode_offsets[episode] + episode_lengths[episode] - 1,
+                    )
+                    for episode in episode_groups[0]
+                ]
+            ).astype(np.int64)
+            reference_actions = source_actions[stats_rows]
         self.actions, self.action_mean, self.action_std = _standardize_actions(
-            all_actions[start:stop], reference_actions
+            all_actions[selected_rows], reference_actions
         )
 
-        final_rows = selected_offsets + selected_lengths - 1 - start
+        final_rows = np.cumsum(selected_lengths) - 1
         self.terminals, self.valids = _compact_boundary_arrays(self.size, final_rows)
         (self.valid_idxs,) = np.nonzero(self.valids > 0)
         self._fields = {
@@ -181,10 +205,11 @@ class LeWMLanceDataset:
         return result
 
 
-def make_lewm_lance_datasets(lance_path, validation_fraction=0.05):
+def make_lewm_lance_datasets(lance_path, validation_fraction=0.05, episode_split_seed=None):
     kwargs = {
         'lance_path': lance_path,
         'validation_fraction': validation_fraction,
+        'episode_split_seed': episode_split_seed,
     }
     return (
         LeWMLanceDataset(split='train', **kwargs),

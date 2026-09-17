@@ -136,6 +136,15 @@ offline training dependency chain:
 3. precompute checkpoint-bound LeWM latents;
 4. train the Action Chunk Prior and full-future LatentPathFlow.
 
+The default temporal unit is ten 20 Hz robot steps (0.5 seconds): LeWM uses
+`frameskip=10`, the Action Chunk Prior uses `chunk_size=10`, and
+LatentPathFlow uses `action_block=10`. The generator predicts two local
+waypoints with `subgoal_steps=20`, at +0.5 and +1.0 seconds. LeWM trains for
+50 epochs and saves every 10 epochs; the Action Chunk Prior and
+LatentPathFlow train for 100,000 optimizer steps. All three stages use the
+same deterministic episode-level 96/4 split (144 training and 6 validation
+episodes), so no episode contributes clips to both training and validation.
+
 Converted data is written to `outputs/data/push_multi_red_cube/`. Checkpoints,
 the latent cache, and logs are written below
 `outputs/train/lerobot_v3/push_multi_red_cube/`. Change `EXPERIMENT_ROOT` in
@@ -145,6 +154,18 @@ This is the offline real-robot-data training pipeline. Deployment on a robot
 also requires a robot-specific runtime that supplies live `camera_h` and goal
 images with the identical long-edge resize, maps the predicted 14-dimensional
 action chunks to the robot SDK, and enforces hardware safety limits.
+
+After training, evaluate all three learned components on the held-out episodes:
+
+```bash
+bash experiments/eval/eval_lewmpp_lerobot_v3_offline.sh
+```
+
+The evaluator independently reports LeWM latent-prediction error, normalized
+Action Chunk Prior prediction error, and LatentPathFlow waypoint metrics in
+`outputs/eval/lerobot_v3/push_multi_red_cube/offline_metrics.json`. These are
+offline checkpoint and generalization metrics, not real-robot task success;
+task success requires the robot-specific deployment runtime described above.
 
 ## Pretrained artifacts
 

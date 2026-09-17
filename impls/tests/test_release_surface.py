@@ -50,6 +50,7 @@ def test_release_has_only_paper_experiment_launchers():
         'train_action-prior-chunk_visual_ogbench8.sh',
         'train_latent_path_flow_visual_ogbench8.sh',
         'train_lewmpp_lerobot_v3.sh',
+        'eval_lewmpp_lerobot_v3_offline.sh',
         'eval_lewmpp_visual_ogbench8.sh',
         'eval_lewm_baseline_visual_ogbench8.sh',
     }
@@ -135,6 +136,18 @@ def test_lerobot_v3_launcher_runs_the_complete_rectangular_image_pipeline():
         'precompute_lewm_lance_latents.py',
         'train_action_prior_chunk.py',
         'train_latent_path_flow_lewm_control.py',
+        '--epochs=50',
+        '--save_interval_epochs=10',
+        '--frameskip=10',
+        '--train_fraction=0.96',
+        '--episode_split',
+        '--chunk_size=10',
+        '--episode_split_seed=0',
+        '--validation_fraction=0.04',
+        '--train-fraction=0.96',
+        '--subgoal-steps=20',
+        '--action-block=10',
+        '--train-steps=100000',
     ):
         assert value in text
 
@@ -196,6 +209,7 @@ def test_python_entrypoints_match_the_release_pipeline():
         'train_action_prior_ogbench.py',
         'train_latent_path_flow_ogbench.py',
         'eval_visual_ogbench.py',
+        'eval_lerobot_v3_offline.py',
     }
 
 

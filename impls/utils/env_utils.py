@@ -105,6 +105,7 @@ def make_env_and_datasets(
     frame_stack=None,
     dataset_path=None,
     validation_fraction=0.05,
+    episode_split_seed=None,
 ):
     """Make OGBench environment and datasets.
 
@@ -118,7 +119,11 @@ def make_env_and_datasets(
     if dataset_path is not None and dataset_path.endswith('.lance'):
         from utils.lewm_dataset import make_lewm_lance_datasets
 
-        train_dataset, val_dataset = make_lewm_lance_datasets(dataset_path, validation_fraction=validation_fraction)
+        train_dataset, val_dataset = make_lewm_lance_datasets(
+            dataset_path,
+            validation_fraction=validation_fraction,
+            episode_split_seed=episode_split_seed,
+        )
         env = DatasetSpecEnv(
             train_dataset.observations.shape[1:],
             train_dataset.observations.dtype,

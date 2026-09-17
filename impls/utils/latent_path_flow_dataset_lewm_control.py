@@ -7,6 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
+from utils.episode_splits import split_episode_indices
+
 
 @dataclass(frozen=True)
 class LatentCache:
@@ -56,14 +58,7 @@ def validate_trajectory_layout(num_rows, offsets, lengths):
 
 
 def split_episodes(num_episodes, train_fraction=0.95, seed=0):
-    if num_episodes < 2:
-        raise ValueError('At least two episodes are required for a train/validation split.')
-    if not 0.0 < train_fraction < 1.0:
-        raise ValueError('train_fraction must be in (0, 1).')
-    permutation = np.random.default_rng(seed).permutation(num_episodes)
-    train_count = int(np.floor(train_fraction * num_episodes))
-    train_count = min(max(train_count, 1), num_episodes - 1)
-    return permutation[:train_count], permutation[train_count:]
+    return split_episode_indices(num_episodes, train_fraction, seed)
 
 
 def build_valid_transitions(offsets, lengths, episode_indices, min_future_steps=1):

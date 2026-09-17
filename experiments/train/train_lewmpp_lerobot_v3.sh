@@ -42,9 +42,13 @@ python impls/train_lewm_control.py \
   --exp_name="lewm_${DATASET_TAG}_seed3072" \
   --decode_workers=6 \
   --seed=3072 \
-  --epochs=10 \
+  --epochs=50 \
+  --save_interval_epochs=10 \
   --batch_size=128 \
-  --frameskip=5 \
+  --frameskip=10 \
+  --train_fraction=0.96 \
+  --episode_split \
+  --split_seed=0 \
   --image_size=224 \
   --learning_rate=5e-5 \
   --weight_decay=1e-3 \
@@ -56,7 +60,7 @@ python impls/train_lewm_control.py \
 python impls/precompute_lewm_lance_latents.py \
   --task="$DATASET_TAG" \
   --lance-path="$LANCE_DATASET" \
-  --checkpoint="$LEWM_DIR/weights_epoch_10.msgpack" \
+  --checkpoint="$LEWM_DIR/weights_epoch_50.msgpack" \
   --output="$LATENT_DATASET" \
   --batch-size=512 \
   --decode-workers=12 \
@@ -67,10 +71,10 @@ python impls/precompute_lewm_lance_latents.py \
 
 python impls/train_action_prior_chunk.py \
   --dataset_path="$LANCE_DATASET" \
-  --lewm_checkpoint="$LEWM_DIR/weights_epoch_10.msgpack" \
+  --lewm_checkpoint="$LEWM_DIR/weights_epoch_50.msgpack" \
   --save_dir="$ACTION_PRIOR_DIR" \
   --train_steps=100000 \
-  --save_interval=100000 \
+  --save_interval=25000 \
   --log_interval=5000 \
   --batch_size=256 \
   --seed=777 \
@@ -78,10 +82,11 @@ python impls/train_action_prior_chunk.py \
   --discount=0.99 \
   --expectile=0.9 \
   --tau=0.005 \
-  --chunk_size=5 \
+  --chunk_size=10 \
   --alpha=3.0 \
   --p_aug=0.0 \
-  --validation_fraction=0.05 \
+  --validation_fraction=0.04 \
+  --episode_split_seed=0 \
   --representation_mode=all \
   2>&1 | tee "$ACTION_PRIOR_DIR/train.log"
 
@@ -92,11 +97,11 @@ python impls/train_latent_path_flow_lewm_control.py \
   --goal-range=full_future \
   --seed=0 \
   --split-seed=0 \
-  --train-fraction=0.95 \
-  --subgoal-steps=10 \
-  --action-block=5 \
+  --train-fraction=0.96 \
+  --subgoal-steps=20 \
+  --action-block=10 \
   --history-size=3 \
-  --train-steps=200000 \
+  --train-steps=100000 \
   --batch-size=1024 \
   --model-dim=512 \
   --depth=4 \

@@ -28,9 +28,12 @@ class LeWMConfig:
     epochs: int = 10
     train_steps: int | None = None
     save_interval_steps: int = 100_000
+    save_interval_epochs: int = 1
     batch_size: int = 128
     decode_workers: int = 6
     train_fraction: float = 0.9
+    episode_split: bool = False
+    split_seed: int = 0
     image_size: int = 224
     image_height: int = 224
     image_width: int = 224
@@ -71,9 +74,13 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--train_steps', type=int)
     parser.add_argument('--save_interval_steps', type=int, default=100_000)
+    parser.add_argument('--save_interval_epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--frameskip', type=int, default=5)
+    parser.add_argument('--train_fraction', type=float, default=0.9)
     parser.add_argument('--image_size', type=int, default=224)
+    parser.add_argument('--episode_split', action='store_true')
+    parser.add_argument('--split_seed', type=int, default=0)
     parser.add_argument('--learning_rate', type=float, default=5e-5)
     parser.add_argument('--weight_decay', type=float, default=1e-3)
     parser.add_argument('--sigreg_weight', type=float, default=0.09)
@@ -167,16 +174,22 @@ def main():
         epochs=args.epochs,
         train_steps=args.train_steps,
         save_interval_steps=args.save_interval_steps,
+        save_interval_epochs=args.save_interval_epochs,
         batch_size=args.batch_size,
         decode_workers=args.decode_workers,
         frameskip=args.frameskip,
+        train_fraction=args.train_fraction,
         image_size=args.image_size,
+        episode_split=args.episode_split,
+        split_seed=args.split_seed,
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         sigreg_weight=args.sigreg_weight,
         sigreg_knots=args.sigreg_knots,
         sigreg_num_proj=args.sigreg_num_proj,
     )
+    if not 0.0 < config.train_fraction < 1.0:
+        raise ValueError('train_fraction must be in (0, 1).')
     dataset_kwargs = {
         'num_steps': config.history_size + config.num_preds,
         'frameskip': config.frameskip,
@@ -187,6 +200,8 @@ def main():
         train_fraction=config.train_fraction,
         decode_workers=config.decode_workers,
         normalize_pixels=False,
+        episode_split=config.episode_split,
+        split_seed=config.split_seed,
         **dataset_kwargs,
     )
     image_height, image_width, image_channels = dataset.observation_shape
@@ -217,6 +232,8 @@ def main():
         raise ValueError('train_steps must be positive.')
     if config.save_interval_steps <= 0:
         raise ValueError('save_interval_steps must be positive.')
+    if config.save_interval_epochs <= 0:
+        raise ValueError('save_interval_epochs must be positive.')
     total_steps = config.train_steps if config.train_steps is not None else config.epochs * steps_per_epoch
     num_epochs = (total_steps + steps_per_epoch - 1) // steps_per_epoch
     lr_schedule, warmup_steps = warmup_cosine_schedule(config.learning_rate, total_steps)
@@ -344,7 +361,9 @@ def main():
             writer.writerow(row)
             csv_file.flush()
             print(json.dumps(row))
-            if config.train_steps is None:
+            if config.train_steps is None and (
+                epoch % config.save_interval_epochs == 0 or epoch == num_epochs
+            ):
                 save_model(
                     state,
                     output_dir / f'weights_epoch_{epoch}.msgpack',

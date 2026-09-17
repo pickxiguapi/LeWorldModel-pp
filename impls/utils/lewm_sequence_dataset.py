@@ -18,6 +18,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from utils.episode_splits import split_episode_indices
+
 IMAGENET_MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
 
@@ -53,6 +55,8 @@ class LeWMSequenceDataset:
         seed=3072,
         decode_workers=6,
         normalize_pixels=False,
+        episode_split=False,
+        split_seed=0,
     ):
         import lancedb
         from lancedb.permutation import Permutation
@@ -90,12 +94,19 @@ class LeWMSequenceDataset:
         changes = np.flatnonzero(np.diff(episode_ids) != 0) + 1
         offsets = np.concatenate([[0], changes]).astype(np.int64)
         lengths = np.diff(np.concatenate([offsets, [len(episode_ids)]])).astype(np.int64)
+        episode_groups = None
+        if episode_split:
+            episode_groups = split_episode_indices(len(offsets), train_fraction, split_seed)
 
         clip_starts = []
-        for offset, length in zip(offsets, lengths):
+        clip_episodes = []
+        for episode_index, (offset, length) in enumerate(zip(offsets, lengths)):
             if length >= self.span:
-                clip_starts.extend(offset + np.arange(length - self.span + 1, dtype=np.int64))
+                starts = offset + np.arange(length - self.span + 1, dtype=np.int64)
+                clip_starts.extend(starts)
+                clip_episodes.extend(np.full(len(starts), episode_index, dtype=np.int64))
         self.clip_starts = np.asarray(clip_starts, dtype=np.int64)
+        clip_episodes = np.asarray(clip_episodes, dtype=np.int64)
         if not len(self.clip_starts):
             raise ValueError(f'No episode in {self.path} is long enough for span={self.span}.')
 
@@ -129,6 +140,12 @@ class LeWMSequenceDataset:
             valid_action_rows = np.ones(len(lance_actions), dtype=bool)
             valid_action_rows[offsets + lengths - 1] = False
             stats_actions = lance_actions[valid_action_rows]
+        if episode_groups is not None:
+            valid_action_rows = np.zeros(len(lance_actions), dtype=bool)
+            for episode in episode_groups[0]:
+                valid_action_rows[offsets[episode] : offsets[episode] + lengths[episode] - 1] = True
+            source_actions = self._source_actions if self._source_actions is not None else lance_actions
+            stats_actions = source_actions[valid_action_rows]
         stats_actions = stats_actions[~np.isnan(stats_actions).any(axis=1)]
         # Preserve the HDF5 source dtype while fitting statistics. This matters
         # most for Reacher, whose source action column is float64. The result is
@@ -143,16 +160,25 @@ class LeWMSequenceDataset:
         # the split ratio and deterministic semantics match the reference,
         # although the exact permutation is backend-specific.
         self._shuffle_rng = np.random.default_rng(seed)
-        permutation = self._shuffle_rng.permutation(len(self.clip_starts))
-        train_size = math.floor(train_fraction * len(permutation))
-        val_size = math.floor((1 - train_fraction) * len(permutation))
-        # stable_pretraining.data.random_split distributes a fractional
-        # remainder from the first split onward; with two splits this gives
-        # the possible single extra clip to training.
-        if train_size + val_size < len(permutation):
-            train_size += 1
-        self.train_indices = permutation[:train_size]
-        self.val_indices = permutation[train_size:]
+        if episode_split:
+            train_episodes, val_episodes = episode_groups
+            self.train_indices = np.flatnonzero(np.isin(clip_episodes, train_episodes))
+            self.val_indices = np.flatnonzero(np.isin(clip_episodes, val_episodes))
+            self.train_episode_indices = train_episodes
+            self.val_episode_indices = val_episodes
+        else:
+            permutation = self._shuffle_rng.permutation(len(self.clip_starts))
+            train_size = math.floor(train_fraction * len(permutation))
+            val_size = math.floor((1 - train_fraction) * len(permutation))
+            # stable_pretraining.data.random_split distributes a fractional
+            # remainder from the first split onward; with two splits this gives
+            # the possible single extra clip to training.
+            if train_size + val_size < len(permutation):
+                train_size += 1
+            self.train_indices = permutation[:train_size]
+            self.val_indices = permutation[train_size:]
+            self.train_episode_indices = None
+            self.val_episode_indices = None
 
     def close(self):
         self._executor.shutdown(wait=True)
