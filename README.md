@@ -163,7 +163,7 @@ This is the offline real-robot-data training pipeline. The real-robot API below
 loads the Lance dataset only to restore the training action normalization and
 bounds; the latent cache is not needed for deployment.
 
-### Real-robot inference and evaluation
+### Real-robot inference
 
 The deployment API accepts raw `camera_h` frames and a desired-goal image. It
 applies the same RGB conversion and 480 x 640 to 168 x 224 long-edge resize
@@ -203,7 +203,6 @@ after ten actions while retaining the incoming image history:
 
 ```python
 policy.warmup(robot.get_camera_h(), goal_image)  # compile before enabling motion
-policy.reset(goal_image)
 while not robot.is_done():
     frame = robot.get_camera_h()                 # RGB uint8, H x W x 3
     action = policy.act(frame)                    # (14,), dataset order above
