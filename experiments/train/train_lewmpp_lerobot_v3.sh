@@ -101,7 +101,7 @@ python impls/train_latent_path_flow_lewm_control.py \
   --subgoal-steps=20 \
   --action-block=10 \
   --history-size=3 \
-  --train-steps=100000 \
+  --train-steps=50000 \
   --batch-size=1024 \
   --model-dim=512 \
   --depth=4 \
@@ -118,7 +118,7 @@ python impls/train_latent_path_flow_lewm_control.py \
   --validation-pairs=10000 \
   --eval-batch-size=1024 \
   --log-interval=1000 \
-  --eval-interval=10000 \
-  --checkpoint-interval=25000 \
+  --eval-interval=5000 \
+  --checkpoint-interval=10000 \
   --resume \
   2>&1 | tee "$LATENT_PATH_FLOW_DIR/train.log"

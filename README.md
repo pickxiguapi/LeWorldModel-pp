@@ -140,10 +140,18 @@ The default temporal unit is ten 20 Hz robot steps (0.5 seconds): LeWM uses
 `frameskip=10`, the Action Chunk Prior uses `chunk_size=10`, and
 LatentPathFlow uses `action_block=10`. The generator predicts two local
 waypoints with `subgoal_steps=20`, at +0.5 and +1.0 seconds. LeWM trains for
-50 epochs and saves every 10 epochs; the Action Chunk Prior and
-LatentPathFlow train for 100,000 optimizer steps. All three stages use the
+50 epochs and saves every 10 epochs; the Action Chunk Prior trains for 100,000
+optimizer steps and LatentPathFlow trains for 50,000 optimizer steps. All three stages use the
 same deterministic episode-level 96/4 split (144 training and 6 validation
 episodes), so no episode contributes clips to both training and validation.
+
+After `lewm_latents.h5` exists, LatentPathFlow can run independently on a
+second GPU while the Action Chunk Prior is still training. Set
+`EXPERIMENT_ROOT` and `GPU_ID` in the dedicated launcher, then run:
+
+```bash
+bash experiments/train/train_latent_path_flow_lerobot_v3.sh
+```
 
 Converted data is written to `outputs/data/push_multi_red_cube/`. Checkpoints,
 the latent cache, and logs are written below
@@ -158,7 +166,7 @@ outputs/
     ├── lewm/weights_epoch_50.msgpack
     ├── lewm_latents.h5
     ├── action_prior/params_100000.pkl
-    └── latent_path_flow/checkpoint_100000.msgpack
+    └── latent_path_flow/checkpoint_50000.msgpack
 ```
 
 This is the offline real-robot-data training pipeline. The real-robot API below
@@ -180,7 +188,7 @@ policy = RealRobotLeWMPPPolicy(
     lewm_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack",
     action_prior_dir="outputs/train/lerobot_v3/push_multi_red_cube/action_prior",
     action_prior_step=100000,
-    latent_path_flow_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_100000.msgpack",
+    latent_path_flow_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_50000.msgpack",
     input_color="rgb",
 )
 
