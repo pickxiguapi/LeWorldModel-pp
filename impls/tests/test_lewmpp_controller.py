@@ -39,6 +39,16 @@ class FakePopulationPrior:
         return np.arange(self.batch_size * 10, dtype=np.float32).reshape(self.batch_size, 10)
 
 
+class FakeWorldModel:
+    def _rollout_predictions(self):
+        raise AssertionError('Fake apply should receive, but not call, this method.')
+
+    def apply(self, variables, pixels, goals, candidates, method=None):
+        del variables, pixels, goals, method
+        predictions = jnp.mean(candidates, axis=-1, keepdims=True)
+        return jnp.zeros((1, 1), dtype=jnp.float32), predictions
+
+
 class ControllerTest(unittest.TestCase):
     def test_public_planner_surface_has_no_legacy_controller(self):
         path = Path(__file__).parents[1] / 'lewm_jax' / 'planner_lewm_control.py'
@@ -101,6 +111,36 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(controller.action_prior.batch_size, 8)
         np.testing.assert_array_equal(blocks[0].reshape(-1), np.arange(40, dtype=np.float32))
         np.testing.assert_array_equal(blocks[1].reshape(-1), np.arange(40, 80, dtype=np.float32))
+
+    def test_policy_best_of_n_scores_only_one_action_block(self):
+        controller = object.__new__(LeWMPPController)
+        controller.model = FakeWorldModel()
+        controller.variables = {}
+        controller.num_samples = 4
+        controller.iterations = 1
+        controller.topk = 2
+        controller.var_scale = 1.0
+        controller.cost_mode = 'moh'
+        controller.subgoal_generator = object()
+        controller.action_prior_mode = 'policy_best_of_n'
+        controller.action_prior_population_size = 4
+        controller.planner_action_low = None
+        controller.planner_action_high = None
+        controller.action_block = 2
+        plan_one = jax.jit(controller._build_plan_one())
+        proposals = jnp.asarray([[[3.0, 1.0], [2.0, 2.0], [0.0, 0.0], [-4.0, -2.0]]])
+
+        selected = plan_one(
+            jax.random.PRNGKey(0),
+            jnp.zeros((1, 4, 4, 3), dtype=jnp.uint8),
+            jnp.zeros((1, 4, 4, 3), dtype=jnp.uint8),
+            jnp.zeros((1,), dtype=jnp.float32),
+            jnp.zeros((1, 2), dtype=jnp.float32),
+            proposals,
+        )
+
+        self.assertEqual(selected.shape, (1, 2))
+        np.testing.assert_array_equal(selected[0], proposals[0, 2])
 
     def test_runtime_uses_consecutive_observation_history(self):
         generator = object.__new__(SubgoalGenerator)

@@ -165,6 +165,8 @@ def test_lerobot_v3_robot_api_is_documented_with_final_checkpoints():
         'eval_real_robot_lewmdp',
         '--policy=lewmdp',
         '--diffusion-policy-checkpoint',
+        'policy_best_of_n',
+        '--diffusion-population-size=256',
     ):
         assert value in text
     assert (ROOT / 'impls' / 'eval_real_robot_lewmdp.py').is_file()

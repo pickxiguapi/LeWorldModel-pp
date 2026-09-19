@@ -83,11 +83,18 @@ class LeWMPPController:
             raise ValueError('CEM variance scale must be positive.')
         if cost_mode not in ('last', 'moh'):
             raise ValueError(f'Unsupported CEM cost mode: {cost_mode!r}.')
-        if action_prior_mode not in ('zero', 'policy_mode', 'policy_mode_anchor', 'policy_random_mixture'):
+        if action_prior_mode not in (
+            'zero',
+            'policy_mode',
+            'policy_mode_anchor',
+            'policy_random_mixture',
+            'policy_best_of_n',
+        ):
             raise ValueError(f'Unsupported action-prior mode: {action_prior_mode!r}.')
         if (action_prior is None) != (action_prior_mode == 'zero'):
             raise ValueError('Action prior must be absent exactly when action_prior_mode=zero.')
         mixture_mode = action_prior_mode == 'policy_random_mixture'
+        best_of_n_mode = action_prior_mode == 'policy_best_of_n'
         action_prior_population_size = int(action_prior_population_size)
         if mixture_mode:
             if not 1 <= action_prior_population_size < int(num_samples):
@@ -95,8 +102,13 @@ class LeWMPPController:
             random_count = int(num_samples) - action_prior_population_size
             if random_count >= int(topk):
                 raise ValueError('Policy/random mixture requires fewer random candidates than top-k elites.')
+        elif best_of_n_mode:
+            if action_prior_population_size != int(num_samples):
+                raise ValueError('Policy best-of-N requires one policy proposal per candidate.')
+            if int(iterations) != 1:
+                raise ValueError('Policy best-of-N uses one scoring pass and no CEM refit.')
         elif action_prior_population_size != 0:
-            raise ValueError('Action-prior population size only applies to policy_random_mixture.')
+            raise ValueError('Action-prior population size only applies to population guidance modes.')
         if (action_low is None) != (action_high is None):
             raise ValueError('Action low and high bounds must be provided together.')
 
@@ -143,11 +155,14 @@ class LeWMPPController:
             )
 
         self.requested_horizon = int(horizon)
-        self.horizon = (
-            self.requested_horizon
-            if self.subgoal_generator is None
-            else subgoal_planning_horizon(self.subgoal_generator.waypoint_step, self.action_block)
-        )
+        if best_of_n_mode:
+            self.horizon = 1
+        else:
+            self.horizon = (
+                self.requested_horizon
+                if self.subgoal_generator is None
+                else subgoal_planning_horizon(self.subgoal_generator.waypoint_step, self.action_block)
+            )
         if self.receding_horizon > self.horizon:
             raise ValueError('CEM receding horizon cannot exceed the planning horizon.')
 
@@ -204,7 +219,9 @@ class LeWMPPController:
         use_local_target = self.subgoal_generator is not None
         anchor_policy_mode = self.action_prior_mode == 'policy_mode_anchor'
         mixture_mode = self.action_prior_mode == 'policy_random_mixture'
-        action_prior_population_size = self.action_prior_population_size if mixture_mode else 0
+        best_of_n_mode = self.action_prior_mode == 'policy_best_of_n'
+        population_mode = mixture_mode or best_of_n_mode
+        action_prior_population_size = self.action_prior_population_size if population_mode else 0
         random_count = num_samples - action_prior_population_size if mixture_mode else 0
         planner_action_low = (
             None if self.planner_action_low is None else jnp.asarray(self.planner_action_low, dtype=jnp.float32)
@@ -214,6 +231,34 @@ class LeWMPPController:
         )
 
         def plan_one(key, pixels, goals, target_embedding, initial_mean, action_prior_blocks):
+            def candidate_costs(candidates):
+                goal_embeddings, predictions = model.apply(
+                    variables,
+                    pixels[None, None],
+                    goals[None, None],
+                    candidates[None],
+                    method=model._rollout_predictions,
+                )
+                target = target_embedding[None, None, None] if use_local_target else goal_embeddings[:, None, None]
+                distances = jnp.sum((predictions - target) ** 2, axis=-1)[0]
+                return reduce_rollout_costs(distances, cost_mode)
+
+            if best_of_n_mode:
+                policy_blocks = action_prior_blocks[0]
+                candidates = jnp.broadcast_to(
+                    initial_mean[None],
+                    (action_prior_population_size, *initial_mean.shape),
+                )
+                candidates = candidates.at[:, 0].set(policy_blocks)
+                if planner_action_low is not None:
+                    candidates = jnp.clip(
+                        candidates,
+                        planner_action_low[None, None],
+                        planner_action_high[None, None],
+                    )
+                costs = candidate_costs(candidates)
+                return candidates[jnp.argmin(costs)]
+
             def optimizer_step(iteration, carry):
                 if mixture_mode:
                     key, mean, std, _ = carry
@@ -241,16 +286,7 @@ class LeWMPPController:
                         planner_action_low[None, None],
                         planner_action_high[None, None],
                     )
-                goal_embeddings, predictions = model.apply(
-                    variables,
-                    pixels[None, None],
-                    goals[None, None],
-                    candidates[None],
-                    method=model._rollout_predictions,
-                )
-                target = target_embedding[None, None, None] if use_local_target else goal_embeddings[:, None, None]
-                distances = jnp.sum((predictions - target) ** 2, axis=-1)[0]
-                costs = reduce_rollout_costs(distances, cost_mode)
+                costs = candidate_costs(candidates)
                 if mixture_mode:
                     elite_indices = _policy_random_mixture_elites(
                         costs,
@@ -368,8 +404,13 @@ class LeWMPPController:
             prior_key, plan_key = self._next_plan_keys(env_index)
             target_embedding = np.zeros(int(self.lewm_config['embed_dim']), dtype=np.float32)
             if self.subgoal_generator is not None:
-                target_embedding = self.subgoal_generator.predict_path(env_index, np.asarray(goals[env_index, -1]))[-1]
-            if self.action_prior_mode == 'policy_random_mixture':
+                predicted_path = self.subgoal_generator.predict_path(
+                    env_index, np.asarray(goals[env_index, -1])
+                )
+                target_embedding = (
+                    predicted_path[0] if self.action_prior_mode == 'policy_best_of_n' else predicted_path[-1]
+                )
+            if self.action_prior_mode in ('policy_random_mixture', 'policy_best_of_n'):
                 action_prior_blocks = self._action_prior_population(
                     pixels[env_index], goals[env_index], prior_key
                 )

@@ -1,4 +1,5 @@
 import base64
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
@@ -135,3 +136,33 @@ def test_health_is_compatible_with_unchanged_client(policy_name):
         assert health['cem_iterations'] == 2
         assert health['action_prior_population_size'] == 285
         assert health['random_population_size'] == 15
+
+
+def test_health_reports_policy_best_of_n_without_cem_refits():
+    policy = FakeLeWMPPPolicy()
+    policy.controller = SimpleNamespace(
+        horizon=1,
+        receding_horizon=1,
+        action_block=10,
+        num_samples=256,
+        iterations=1,
+        action_prior_mode='policy_best_of_n',
+        action_prior_population_size=256,
+    )
+    service = LeWMARXInferenceService(
+        policy,
+        'lewmdp',
+        {'lewm_checkpoint': '/checkpoint'},
+        image_hw=(480, 640),
+        warmup=False,
+    )
+
+    health = service.health()
+
+    assert health['cem_horizon'] == 1
+    assert health['planning_horizon_actions'] == 10
+    assert health['cem_num_samples'] == 256
+    assert health['action_prior_population_size'] == 256
+    assert health['random_population_size'] == 0
+    assert health['candidate_evaluation_rounds'] == 1
+    assert health['cem_refit_iterations'] == 0

@@ -160,6 +160,7 @@ class RealRobotLeWMDPPolicy(_RealRobotPolicyBase):
         cem_var_scale=1.0,
         flow_sampling_steps=16,
         action_prior_population_size=285,
+        policy_guidance='policy_random_mixture',
         diffusion_batch_size=32,
     ):
         from lewm_jax import checkpoint_image_shape
@@ -190,7 +191,7 @@ class RealRobotLeWMDPPolicy(_RealRobotPolicyBase):
             var_scale=cem_var_scale,
             cost_mode='moh',
             action_prior=diffusion_prior,
-            action_prior_mode='policy_random_mixture',
+            action_prior_mode=policy_guidance,
             action_prior_population_size=action_prior_population_size,
             paired_plan_keys=True,
             action_low=action_low,

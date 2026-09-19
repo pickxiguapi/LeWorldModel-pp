@@ -302,6 +302,10 @@ PYTHONPATH=impls python scripts/eval_real_robot_server.py \
   --lewm-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack \
   --diffusion-policy-checkpoint=/absolute/path/to/diffusion_policy_checkpoint \
   --latent-path-flow-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_050000.msgpack \
+  --policy-guidance=policy_random_mixture \
+  --cem-num-samples=300 \
+  --cem-iterations=2 \
+  --diffusion-population-size=285 \
   --diffusion-batch-size=32 \
   --gpu=0 \
   --host=127.0.0.1 \
@@ -318,6 +322,25 @@ LeWM-DP uses `policy_random_mixture`: each of its two CEM iterations contains
 285 fresh Diffusion Policy proposals and 15 samples from the carried CEM
 distribution, for 300 candidates per iteration. The second iteration starts
 from the first iteration's fitted mean and variance rather than resetting.
+For a no-refit diagnostic, `policy_best_of_n` can instead score 256 ten-action
+Diffusion Policy proposals once against LatentPathFlow's first waypoint and
+execute the best proposal directly:
+
+```bash
+PYTHONPATH=impls python scripts/eval_real_robot_server.py \
+  --policy=lewmdp \
+  --lance-path=outputs/data/push_multi_red_cube/push_multi_red_cube.lance \
+  --lewm-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack \
+  --diffusion-policy-checkpoint=/absolute/path/to/diffusion_policy_checkpoint \
+  --latent-path-flow-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_050000.msgpack \
+  --policy-guidance=policy_best_of_n \
+  --cem-num-samples=256 \
+  --diffusion-population-size=256 \
+  --diffusion-batch-size=32 \
+  --gpu=0 \
+  --host=127.0.0.1 \
+  --port=8765
+```
 
 ## Pretrained artifacts
 

@@ -107,23 +107,32 @@ class LeWMARXInferenceService:
                 }
             )
         else:
+            controller = getattr(self.policy, 'controller', None)
+            cem_num_samples = int(getattr(controller, 'num_samples', 300))
+            cem_iterations = int(getattr(controller, 'iterations', 2 if self.policy_name == 'lewmdp' else 5))
             result.update(
                 {
-                    'cem_horizon': 2,
-                    'cem_receding_horizon': 1,
-                    'action_block': 10,
+                    'cem_horizon': int(getattr(controller, 'horizon', 2)),
+                    'cem_receding_horizon': int(getattr(controller, 'receding_horizon', 1)),
+                    'action_block': int(getattr(controller, 'action_block', 10)),
                     'flow_sampling_steps': 16,
                     'action_prior': 'diffusion_policy' if self.policy_name == 'lewmdp' else 'action_chunk_prior',
-                    'cem_num_samples': 300,
-                    'cem_iterations': 2 if self.policy_name == 'lewmdp' else 5,
+                    'cem_num_samples': cem_num_samples,
+                    'cem_iterations': cem_iterations,
                 }
             )
             if self.policy_name == 'lewmdp':
+                policy_guidance = str(getattr(controller, 'action_prior_mode', 'policy_random_mixture'))
+                policy_population = int(getattr(controller, 'action_prior_population_size', 285))
                 result.update(
                     {
-                        'policy_guidance': 'policy_random_mixture',
-                        'action_prior_population_size': 285,
-                        'random_population_size': 15,
+                        'policy_guidance': policy_guidance,
+                        'action_prior_population_size': policy_population,
+                        'random_population_size': cem_num_samples - policy_population,
+                        'candidate_evaluation_rounds': 1 if policy_guidance == 'policy_best_of_n' else cem_iterations,
+                        'cem_refit_iterations': 0 if policy_guidance == 'policy_best_of_n' else cem_iterations,
+                        'planning_horizon_actions': int(getattr(controller, 'horizon', 2))
+                        * int(getattr(controller, 'action_block', 10)),
                     }
                 )
         return result
@@ -241,6 +250,9 @@ def create_service(args: argparse.Namespace) -> LeWMARXInferenceService:
             raise ValueError('LeWM-DP requires --diffusion-policy-checkpoint and --latent-path-flow-checkpoint')
         from eval_real_robot_lewmdp import RealRobotLeWMDPPolicy
 
+        cem_iterations = args.cem_iterations
+        if cem_iterations is None:
+            cem_iterations = 1 if args.policy_guidance == 'policy_best_of_n' else 2
         policy = RealRobotLeWMDPPolicy(
             lance_path=args.lance_path,
             lewm_checkpoint=args.lewm_checkpoint,
@@ -248,6 +260,10 @@ def create_service(args: argparse.Namespace) -> LeWMARXInferenceService:
             latent_path_flow_checkpoint=args.latent_path_flow_checkpoint,
             diffusion_device=args.diffusion_device,
             diffusion_batch_size=args.diffusion_batch_size,
+            cem_num_samples=args.cem_num_samples,
+            cem_iterations=cem_iterations,
+            action_prior_population_size=args.diffusion_population_size,
+            policy_guidance=args.policy_guidance,
             seed=args.seed,
             input_color='bgr',
         )
@@ -275,14 +291,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--diffusion-policy-checkpoint', type=Path)
     parser.add_argument('--diffusion-device', default='cuda:0')
     parser.add_argument('--diffusion-batch-size', type=int, default=32)
+    parser.add_argument(
+        '--policy-guidance',
+        choices=('policy_random_mixture', 'policy_best_of_n'),
+        default='policy_random_mixture',
+    )
+    parser.add_argument('--cem-num-samples', type=int, default=300)
+    parser.add_argument('--cem-iterations', type=int)
+    parser.add_argument('--diffusion-population-size', type=int, default=285)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--no-warmup', action='store_true')
     args = parser.parse_args()
-    if args.action_prior_step <= 0 or args.diffusion_batch_size <= 0 or not 0 < args.port < 65536:
-        parser.error('--action-prior-step, --diffusion-batch-size and --port must be positive')
+    if (
+        args.action_prior_step <= 0
+        or args.diffusion_batch_size <= 0
+        or args.cem_num_samples <= 1
+        or args.diffusion_population_size <= 0
+        or (args.cem_iterations is not None and args.cem_iterations <= 0)
+        or not 0 < args.port < 65536
+    ):
+        parser.error('Checkpoint steps, population sizes, iterations, batch size, and port must be positive')
     return args
 
 
