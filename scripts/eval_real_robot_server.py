@@ -63,7 +63,7 @@ class LeWMARXInferenceService:
         image_hw: tuple[int, int] = WIRE_IMAGE_HW,
         warmup: bool = True,
     ) -> None:
-        if policy_name not in {'lewm', 'lewmpp'}:
+        if policy_name not in {'lewm', 'lewmpp', 'lewmdp'}:
             raise ValueError(f'Unknown policy: {policy_name!r}')
         self.policy = policy
         self.policy_name = policy_name
@@ -79,8 +79,8 @@ class LeWMARXInferenceService:
             self.last_request_id = 0
 
     def health(self) -> dict[str, Any]:
-        # ddim_steps is retained because the unchanged legacy client requires
-        # this exact field. It is not used by either LeWM policy.
+        # The unchanged legacy client requires this exact field. It is a
+        # compatibility placeholder except when the prior is Diffusion Policy.
         result = {
             'ready': True,
             'policy': self.policy_name,
@@ -91,7 +91,7 @@ class LeWMARXInferenceService:
             'action_steps': 10,
             'action_dim': 14,
             'ddim_steps': 20,
-            'legacy_ddim_field': True,
+            'legacy_ddim_field': self.policy_name != 'lewmdp',
             'action_type': 'absolute_joint',
             'action_order': ACTION_ORDER,
         }
@@ -105,6 +105,7 @@ class LeWMARXInferenceService:
                     'cem_receding_horizon': 1,
                     'action_block': 10,
                     'flow_sampling_steps': 16,
+                    'action_prior': 'diffusion_policy' if self.policy_name == 'lewmdp' else 'action_chunk_prior',
                 }
             )
         return result
@@ -197,7 +198,7 @@ def create_service(args: argparse.Namespace) -> LeWMARXInferenceService:
             input_color='bgr',
         )
         paths = {'lewm_checkpoint': _resolved(args.lewm_checkpoint)}
-    else:
+    elif args.policy == 'lewmpp':
         if args.action_prior_dir is None or args.latent_path_flow_checkpoint is None:
             raise ValueError('LeWM++ requires --action-prior-dir and --latent-path-flow-checkpoint')
         from eval_real_robot_lewmpp import RealRobotLeWMPPPolicy
@@ -217,6 +218,25 @@ def create_service(args: argparse.Namespace) -> LeWMARXInferenceService:
             'action_prior_step': int(args.action_prior_step),
             'latent_path_flow_checkpoint': _resolved(args.latent_path_flow_checkpoint),
         }
+    else:
+        if args.diffusion_policy_checkpoint is None or args.latent_path_flow_checkpoint is None:
+            raise ValueError('LeWM-DP requires --diffusion-policy-checkpoint and --latent-path-flow-checkpoint')
+        from eval_real_robot_lewmdp import RealRobotLeWMDPPolicy
+
+        policy = RealRobotLeWMDPPolicy(
+            lance_path=args.lance_path,
+            lewm_checkpoint=args.lewm_checkpoint,
+            diffusion_policy_checkpoint=args.diffusion_policy_checkpoint,
+            latent_path_flow_checkpoint=args.latent_path_flow_checkpoint,
+            diffusion_device=args.diffusion_device,
+            seed=args.seed,
+            input_color='bgr',
+        )
+        paths = {
+            'lewm_checkpoint': _resolved(args.lewm_checkpoint),
+            'diffusion_policy_checkpoint': _resolved(args.diffusion_policy_checkpoint),
+            'latent_path_flow_checkpoint': _resolved(args.latent_path_flow_checkpoint),
+        }
     return LeWMARXInferenceService(
         policy,
         args.policy,
@@ -227,12 +247,14 @@ def create_service(args: argparse.Namespace) -> LeWMARXInferenceService:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--policy', choices=('lewm', 'lewmpp'), required=True)
+    parser.add_argument('--policy', choices=('lewm', 'lewmpp', 'lewmdp'), required=True)
     parser.add_argument('--lance-path', type=Path, required=True)
     parser.add_argument('--lewm-checkpoint', type=Path, required=True)
     parser.add_argument('--action-prior-dir', type=Path)
     parser.add_argument('--action-prior-step', type=int, default=100_000)
     parser.add_argument('--latent-path-flow-checkpoint', type=Path)
+    parser.add_argument('--diffusion-policy-checkpoint', type=Path)
+    parser.add_argument('--diffusion-device', default='cuda:0')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--host', default='127.0.0.1')

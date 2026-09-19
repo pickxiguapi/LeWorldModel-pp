@@ -98,7 +98,8 @@ class LeWMPPController:
         self.action_prior = action_prior
         self.action_prior_mode = str(action_prior_mode)
         self.paired_plan_keys = bool(paired_plan_keys)
-        if action_prior is not None and str(action_prior.lewm_checkpoint) != self.lewm_checkpoint:
+        prior_lewm_checkpoint = None if action_prior is None else getattr(action_prior, 'lewm_checkpoint', None)
+        if prior_lewm_checkpoint is not None and str(prior_lewm_checkpoint) != self.lewm_checkpoint:
             raise ValueError('Action prior and planner must use the same LeWM checkpoint.')
 
         self._encode_pixels = jax.jit(

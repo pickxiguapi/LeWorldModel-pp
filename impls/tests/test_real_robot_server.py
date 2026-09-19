@@ -89,11 +89,12 @@ def test_lewm_server_returns_ten_actions_and_retains_episode_state():
     np.testing.assert_array_equal(np.asarray(second['actions'])[:, 0], np.arange(11, 21))
 
 
-def test_lewmpp_server_returns_exact_planned_chunk():
+@pytest.mark.parametrize('policy_name', ('lewmpp', 'lewmdp'))
+def test_lewmpp_server_returns_exact_planned_chunk(policy_name):
     image = np.zeros((4, 6, 3), dtype=np.uint8)
     service = LeWMARXInferenceService(
         FakeLeWMPPPolicy(),
-        'lewmpp',
+        policy_name,
         {'lewm_checkpoint': '/checkpoint'},
         image_hw=(4, 6),
         warmup=False,
@@ -107,7 +108,7 @@ def test_lewmpp_server_returns_exact_planned_chunk():
     )
 
 
-@pytest.mark.parametrize('policy_name', ('lewm', 'lewmpp'))
+@pytest.mark.parametrize('policy_name', ('lewm', 'lewmpp', 'lewmdp'))
 def test_health_is_compatible_with_unchanged_client(policy_name):
     policy = FakeLeWMPolicy() if policy_name == 'lewm' else FakeLeWMPPPolicy()
     service = LeWMARXInferenceService(
@@ -124,3 +125,7 @@ def test_health_is_compatible_with_unchanged_client(policy_name):
     assert health['action_steps'] == 10
     assert health['action_dim'] == 14
     assert health['ddim_steps'] == 20
+    assert health['legacy_ddim_field'] == (policy_name != 'lewmdp')
+    if policy_name != 'lewm':
+        expected_prior = 'diffusion_policy' if policy_name == 'lewmdp' else 'action_chunk_prior'
+        assert health['action_prior'] == expected_prior

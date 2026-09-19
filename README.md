@@ -165,8 +165,8 @@ bounds; the latent cache is not needed for deployment.
 
 ### Real-robot inference
 
-The two inference APIs accept either a raw `camera_h` frame or an observation
-dictionary containing `camera_h` or `observation.images.camera_h`. Both apply
+The three inference APIs accept either a raw `camera_h` frame or an observation
+dictionary containing `camera_h` or `observation.images.camera_h`. They apply
 the same RGB conversion and 480 x 640 to 168 x 224 long-edge resize used in
 training and return actions in the original 14-dimensional robot units.
 
@@ -208,6 +208,29 @@ actions = policy.plan_action_chunk(recent_frames, goal_image)  # (10, 14)
 for action in actions:
     robot.send_action(action)
 ```
+
+To keep LatentPathFlow, MoH, and the LeWM++ planner while replacing only the
+Action Chunk Prior with a goal-conditioned Diffusion Policy, use LeWM-DP:
+
+```python
+from eval_real_robot_lewmdp import RealRobotLeWMDPPolicy
+
+policy = RealRobotLeWMDPPolicy(
+    lance_path="outputs/data/push_multi_red_cube/push_multi_red_cube.lance",
+    lewm_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack",
+    diffusion_policy_checkpoint="/absolute/path/to/diffusion_policy_checkpoint",
+    latent_path_flow_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_050000.msgpack",
+    input_color="rgb",
+)
+
+recent_frames = [camera_h_t_minus_2, camera_h_t_minus_1, camera_h_t]
+actions = policy.plan_action_chunk(recent_frames, goal_image)  # (10, 14)
+```
+
+The Diffusion Policy checkpoint must be goal-conditioned with three observation
+frames, one goal frame, a 10-step horizon, 14-dimensional actions, and 20 DDIM
+steps. Its native actions initialize the CEM mean after conversion to LeWM's
+normalized action space; LeWM++ still performs the final optimization.
 
 The 14 columns preserve the dataset order exactly:
 
@@ -270,11 +293,26 @@ PYTHONPATH=impls python scripts/eval_real_robot_server.py \
   --port=8765
 ```
 
+Start LeWM++ with the Diffusion Policy prior using:
+
+```bash
+PYTHONPATH=impls python scripts/eval_real_robot_server.py \
+  --policy=lewmdp \
+  --lance-path=outputs/data/push_multi_red_cube/push_multi_red_cube.lance \
+  --lewm-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack \
+  --diffusion-policy-checkpoint=/absolute/path/to/diffusion_policy_checkpoint \
+  --latent-path-flow-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_050000.msgpack \
+  --gpu=0 \
+  --host=127.0.0.1 \
+  --port=8765
+```
+
 The server performs one warmup compilation before opening the port. It accepts
 the client's three BGR `480 x 640` history frames and PNG goal, and returns the
 same `10 x 14` JSON action array expected by the client. For compatibility, the
-health response retains the legacy `ddim_steps=20` field; LeWM does not use
-DDIM, and the response also identifies the actual policy and planner settings.
+health response retains `ddim_steps=20`; it is a compatibility field for LeWM
+and ordinary LeWM++, and the actual Diffusion Policy setting for LeWM-DP. The
+response also identifies the policy, prior, and planner settings.
 
 ## Pretrained artifacts
 

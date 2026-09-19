@@ -162,8 +162,12 @@ def test_lerobot_v3_robot_api_is_documented_with_final_checkpoints():
         'policy.act(frame)',
         'left_joint_0',
         'right_gripper',
+        'eval_real_robot_lewmdp',
+        '--policy=lewmdp',
+        '--diffusion-policy-checkpoint',
     ):
         assert value in text
+    assert (ROOT / 'impls' / 'eval_real_robot_lewmdp.py').is_file()
 
 
 def test_paper_evaluations_explicitly_require_all_representation_sharing():
@@ -220,6 +224,7 @@ def test_python_entrypoints_match_the_release_pipeline():
         'train_latent_path_flow_lewm_control.py',
         'eval_lewm_control_suite.py',
         'eval_real_robot_lewm.py',
+        'eval_real_robot_lewmdp.py',
         'eval_real_robot_lewmpp.py',
         'train_lewm_ogbench.py',
         'train_action_prior_ogbench.py',
