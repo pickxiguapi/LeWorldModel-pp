@@ -219,6 +219,8 @@ def test_python_entrypoints_match_the_release_pipeline():
         'train_lewm_control.py',
         'train_latent_path_flow_lewm_control.py',
         'eval_lewm_control_suite.py',
+        'eval_real_robot_lewm.py',
+        'eval_real_robot_lewmpp.py',
         'train_lewm_ogbench.py',
         'train_action_prior_ogbench.py',
         'train_latent_path_flow_ogbench.py',

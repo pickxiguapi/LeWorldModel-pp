@@ -163,15 +163,32 @@ This is the offline real-robot-data training pipeline. The real-robot API below
 loads the Lance dataset only to restore the training action normalization and
 bounds; the latent cache is not needed for deployment.
 
-### Real-robot inference
+### Real-robot evaluation
 
-The deployment API accepts raw `camera_h` frames and a desired-goal image. It
-applies the same RGB conversion and 480 x 640 to 168 x 224 long-edge resize
-used in training. The most direct interface takes several recent frames,
-ordered from oldest to newest, and returns the next `10 x 14` action chunk:
+The two evaluation APIs accept either a raw `camera_h` frame or an observation
+dictionary containing `camera_h` or `observation.images.camera_h`. Both apply
+the same RGB conversion and 480 x 640 to 168 x 224 long-edge resize used in
+training and return actions in the original 14-dimensional robot units.
+
+The LeWM baseline only needs the Lance data and LeWM checkpoint:
 
 ```python
-from real_robot_lewmpp import RealRobotLeWMPPPolicy
+from eval_real_robot_lewm import RealRobotLeWMPolicy
+
+policy = RealRobotLeWMPolicy(
+    lance_path="outputs/data/push_multi_red_cube/push_multi_red_cube.lance",
+    lewm_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack",
+    input_color="rgb",
+)
+
+policy.reset(goal_observation)
+action = policy.act(observation)  # (14,)
+```
+
+LeWM++ additionally loads the Action Prior and LatentPathFlow checkpoints:
+
+```python
+from eval_real_robot_lewmpp import RealRobotLeWMPPPolicy
 
 policy = RealRobotLeWMPPPolicy(
     lance_path="outputs/data/push_multi_red_cube/push_multi_red_cube.lance",
@@ -182,6 +199,10 @@ policy = RealRobotLeWMPPPolicy(
     input_color="rgb",
 )
 
+policy.reset(goal_observation)
+action = policy.act(observation)  # (14,)
+
+# Or plan one complete 10-action chunk from recent observations.
 recent_frames = [camera_h_t_minus_2, camera_h_t_minus_1, camera_h_t]
 actions = policy.plan_action_chunk(recent_frames, goal_image)  # (10, 14)
 for action in actions:
@@ -197,9 +218,9 @@ right_joint_0, right_joint_1, right_joint_2, right_joint_3,
 right_joint_4, right_joint_5, right_gripper
 ```
 
-For receding-horizon evaluation, call the streaming interface once for every
-new camera frame. It returns one action at a time and automatically replans
-after ten actions while retaining the incoming image history:
+For closed-loop evaluation, call the streaming interface once for every new
+observation. Each policy returns one action at a time and replans when its
+current action buffer is empty:
 
 ```python
 policy.warmup(robot.get_camera_h(), goal_image)  # compile before enabling motion
