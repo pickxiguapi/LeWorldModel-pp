@@ -1,3 +1,4 @@
+import inspect
 from collections import deque
 
 import numpy as np
@@ -128,6 +129,13 @@ def test_lewmdp_uses_three_frames_and_returns_one_optimized_chunk():
 
 def test_diffusion_prior_seed_conversion_is_stable():
     assert DiffusionPolicyPrior._seed_value(np.asarray([1, 2], dtype=np.uint32)) == (1 << 32) ^ 2
+
+
+def test_lewmdp_defaults_to_two_round_285_policy_mixture():
+    parameters = inspect.signature(RealRobotLeWMDPPolicy).parameters
+    assert parameters['cem_num_samples'].default == 300
+    assert parameters['cem_iterations'].default == 2
+    assert parameters['action_prior_population_size'].default == 285
 
 
 def test_legacy_diffusion_config_uses_vendored_goal_conditioned_type(tmp_path):

@@ -38,6 +38,15 @@ def _set_cem_anchors(candidates, mean, policy_anchor, anchor_policy):
     return candidates
 
 
+def _policy_random_mixture_elites(costs, policy_count, topk, random_count):
+    """Select top-k elites while retaining the best required policy proposals."""
+    policy_floor = topk - random_count
+    _, policy_indices = jax.lax.top_k(-costs[:policy_count], policy_floor)
+    remaining_costs = costs.at[policy_indices].set(jnp.inf)
+    _, extra_indices = jax.lax.top_k(-remaining_costs, random_count)
+    return jnp.concatenate((policy_indices, extra_indices), axis=0)
+
+
 class LeWMPPController:
     """LeWM CEM with a selectable subgoal generator and action-prior mode."""
 
@@ -57,6 +66,7 @@ class LeWMPPController:
         cost_mode='moh',
         action_prior=None,
         action_prior_mode='zero',
+        action_prior_population_size=0,
         paired_plan_keys=True,
         action_low=None,
         action_high=None,
@@ -73,10 +83,20 @@ class LeWMPPController:
             raise ValueError('CEM variance scale must be positive.')
         if cost_mode not in ('last', 'moh'):
             raise ValueError(f'Unsupported CEM cost mode: {cost_mode!r}.')
-        if action_prior_mode not in ('zero', 'policy_mode', 'policy_mode_anchor'):
+        if action_prior_mode not in ('zero', 'policy_mode', 'policy_mode_anchor', 'policy_random_mixture'):
             raise ValueError(f'Unsupported action-prior mode: {action_prior_mode!r}.')
         if (action_prior is None) != (action_prior_mode == 'zero'):
             raise ValueError('Action prior must be absent exactly when action_prior_mode=zero.')
+        mixture_mode = action_prior_mode == 'policy_random_mixture'
+        action_prior_population_size = int(action_prior_population_size)
+        if mixture_mode:
+            if not 1 <= action_prior_population_size < int(num_samples):
+                raise ValueError('Policy/random mixture requires policy population in [1, CEM samples).')
+            random_count = int(num_samples) - action_prior_population_size
+            if random_count >= int(topk):
+                raise ValueError('Policy/random mixture requires fewer random candidates than top-k elites.')
+        elif action_prior_population_size != 0:
+            raise ValueError('Action-prior population size only applies to policy_random_mixture.')
         if (action_low is None) != (action_high is None):
             raise ValueError('Action low and high bounds must be provided together.')
 
@@ -97,6 +117,7 @@ class LeWMPPController:
         self.cost_mode = str(cost_mode)
         self.action_prior = action_prior
         self.action_prior_mode = str(action_prior_mode)
+        self.action_prior_population_size = action_prior_population_size
         self.paired_plan_keys = bool(paired_plan_keys)
         prior_lewm_checkpoint = None if action_prior is None else getattr(action_prior, 'lewm_checkpoint', None)
         if prior_lewm_checkpoint is not None and str(prior_lewm_checkpoint) != self.lewm_checkpoint:
@@ -182,6 +203,9 @@ class LeWMPPController:
         cost_mode = self.cost_mode
         use_local_target = self.subgoal_generator is not None
         anchor_policy_mode = self.action_prior_mode == 'policy_mode_anchor'
+        mixture_mode = self.action_prior_mode == 'policy_random_mixture'
+        action_prior_population_size = self.action_prior_population_size if mixture_mode else 0
+        random_count = num_samples - action_prior_population_size if mixture_mode else 0
         planner_action_low = (
             None if self.planner_action_low is None else jnp.asarray(self.planner_action_low, dtype=jnp.float32)
         )
@@ -189,9 +213,12 @@ class LeWMPPController:
             None if self.planner_action_high is None else jnp.asarray(self.planner_action_high, dtype=jnp.float32)
         )
 
-        def plan_one(key, pixels, goals, target_embedding, initial_mean):
-            def optimizer_step(_, carry):
-                key, mean, std = carry
+        def plan_one(key, pixels, goals, target_embedding, initial_mean, action_prior_blocks):
+            def optimizer_step(iteration, carry):
+                if mixture_mode:
+                    key, mean, std, _ = carry
+                else:
+                    key, mean, std = carry
                 key, sample_key = jax.random.split(key)
                 candidates = (
                     jax.random.normal(
@@ -202,7 +229,12 @@ class LeWMPPController:
                     * std[None]
                     + mean[None]
                 )
-                candidates = _set_cem_anchors(candidates, mean, initial_mean, anchor_policy_mode)
+                if mixture_mode:
+                    candidates = candidates.at[:action_prior_population_size, 0].set(
+                        action_prior_blocks[iteration]
+                    )
+                else:
+                    candidates = _set_cem_anchors(candidates, mean, initial_mean, anchor_policy_mode)
                 if planner_action_low is not None:
                     candidates = jnp.clip(
                         candidates,
@@ -219,20 +251,37 @@ class LeWMPPController:
                 target = target_embedding[None, None, None] if use_local_target else goal_embeddings[:, None, None]
                 distances = jnp.sum((predictions - target) ** 2, axis=-1)[0]
                 costs = reduce_rollout_costs(distances, cost_mode)
-                _, elite_indices = jax.lax.top_k(-costs, topk)
+                if mixture_mode:
+                    elite_indices = _policy_random_mixture_elites(
+                        costs,
+                        action_prior_population_size,
+                        topk,
+                        random_count,
+                    )
+                else:
+                    _, elite_indices = jax.lax.top_k(-costs, topk)
                 elites = candidates[elite_indices]
-                return key, elites.mean(axis=0), elites.std(axis=0, ddof=1)
+                output = (key, elites.mean(axis=0), elites.std(axis=0, ddof=1))
+                if mixture_mode:
+                    output += (candidates[jnp.argmin(costs)],)
+                return output
 
-            _, mean, _ = jax.lax.fori_loop(
-                0,
-                iterations,
-                optimizer_step,
-                (
-                    key,
-                    initial_mean,
-                    jnp.full_like(initial_mean, var_scale),
-                ),
-            )
+            initial_std = jnp.full_like(initial_mean, var_scale)
+            if mixture_mode:
+                _, mean, _, best_candidate = jax.lax.fori_loop(
+                    0,
+                    iterations,
+                    optimizer_step,
+                    (key, initial_mean, initial_std, jnp.zeros_like(initial_mean)),
+                )
+                mean = best_candidate
+            else:
+                _, mean, _ = jax.lax.fori_loop(
+                    0,
+                    iterations,
+                    optimizer_step,
+                    (key, initial_mean, initial_std),
+                )
             if planner_action_low is not None:
                 mean = jnp.clip(mean, planner_action_low, planner_action_high)
             return mean
@@ -265,23 +314,48 @@ class LeWMPPController:
         self.rng, prior_key, plan_key = jax.random.split(self.rng, 3)
         return prior_key, plan_key
 
-    def _initial_mean(self, env_index, pixels, goals, prior_key):
+    def _action_prior_population(self, pixels, goals, prior_key):
+        count = self.action_prior_population_size
+        total_count = count * self.iterations
+        observations = np.asarray(pixels[-1:])
+        final_goals = np.asarray(goals[-1:])
+        blocks = np.asarray(
+            self.action_prior.sample_actions(
+                observations=np.broadcast_to(observations, (total_count, *observations.shape[1:])),
+                goals=np.broadcast_to(final_goals, (total_count, *final_goals.shape[1:])),
+                seed=prior_key,
+                temperature=1.0,
+            )
+        )
+        expected = (total_count, self.block_action_dim)
+        if blocks.shape != expected:
+            raise ValueError(f'Action-prior population returned {blocks.shape}; expected {expected}.')
+        return blocks.reshape(self.iterations, count, self.block_action_dim)
+
+    def _initial_mean(self, env_index, pixels, goals, prior_key, prior_block=None):
         mean = np.zeros((self.horizon, self.block_action_dim), dtype=np.float32)
         warm_start = self.warm_starts[env_index]
         if warm_start is not None:
             mean[: len(warm_start)] = warm_start
         if self.action_prior is not None:
-            block = np.asarray(
-                self.action_prior.sample_actions(
-                    observations=np.asarray(pixels[-1:]),
-                    goals=np.asarray(goals[-1:]),
-                    seed=prior_key,
-                    temperature=0.0,
+            if prior_block is None:
+                block = np.asarray(
+                    self.action_prior.sample_actions(
+                        observations=np.asarray(pixels[-1:]),
+                        goals=np.asarray(goals[-1:]),
+                        seed=prior_key,
+                        temperature=0.0,
+                    )
                 )
-            )
-            if block.shape != (1, self.block_action_dim):
-                raise ValueError(f'Action prior returned {block.shape}; expected (1, {self.block_action_dim}).')
-            mean[0] = block[0]
+                if block.shape != (1, self.block_action_dim):
+                    raise ValueError(f'Action prior returned {block.shape}; expected (1, {self.block_action_dim}).')
+                prior_block = block[0]
+            prior_block = np.asarray(prior_block, dtype=np.float32)
+            if prior_block.shape != (self.block_action_dim,):
+                raise ValueError(
+                    f'Action-prior block returned {prior_block.shape}; expected ({self.block_action_dim},).'
+                )
+            mean[0] = prior_block
         return mean
 
     def get_actions(self, pixels, goals, alive):
@@ -295,7 +369,21 @@ class LeWMPPController:
             target_embedding = np.zeros(int(self.lewm_config['embed_dim']), dtype=np.float32)
             if self.subgoal_generator is not None:
                 target_embedding = self.subgoal_generator.predict_path(env_index, np.asarray(goals[env_index, -1]))[-1]
-            initial_mean = self._initial_mean(env_index, pixels[env_index], goals[env_index], prior_key)
+            if self.action_prior_mode == 'policy_random_mixture':
+                action_prior_blocks = self._action_prior_population(
+                    pixels[env_index], goals[env_index], prior_key
+                )
+                prior_block = action_prior_blocks[0, 0]
+            else:
+                action_prior_blocks = np.zeros((1, 1, self.block_action_dim), dtype=np.float32)
+                prior_block = None
+            initial_mean = self._initial_mean(
+                env_index,
+                pixels[env_index],
+                goals[env_index],
+                prior_key,
+                prior_block=prior_block,
+            )
             normalized_blocks = np.asarray(
                 self._plan_one(
                     plan_key,
@@ -303,6 +391,7 @@ class LeWMPPController:
                     jnp.asarray(goals[env_index]),
                     jnp.asarray(target_embedding),
                     jnp.asarray(initial_mean),
+                    jnp.asarray(action_prior_blocks),
                 )
             )
             keep = normalized_blocks[: self.receding_horizon]

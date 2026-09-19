@@ -129,3 +129,9 @@ def test_health_is_compatible_with_unchanged_client(policy_name):
     if policy_name != 'lewm':
         expected_prior = 'diffusion_policy' if policy_name == 'lewmdp' else 'action_chunk_prior'
         assert health['action_prior'] == expected_prior
+    if policy_name == 'lewmdp':
+        assert health['policy_guidance'] == 'policy_random_mixture'
+        assert health['cem_num_samples'] == 300
+        assert health['cem_iterations'] == 2
+        assert health['action_prior_population_size'] == 285
+        assert health['random_population_size'] == 15

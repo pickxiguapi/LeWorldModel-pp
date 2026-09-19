@@ -26,6 +26,19 @@ class FakePrior:
         return jnp.arange(10, dtype=jnp.float32)[None]
 
 
+class FakePopulationPrior:
+    action_horizon = 5
+
+    def __init__(self):
+        self.batch_size = None
+
+    def sample_actions(self, observations, goals, seed, temperature):
+        del goals, seed
+        self.batch_size = observations.shape[0]
+        assert temperature == 1.0
+        return np.arange(self.batch_size * 10, dtype=np.float32).reshape(self.batch_size, 10)
+
+
 class ControllerTest(unittest.TestCase):
     def test_public_planner_surface_has_no_legacy_controller(self):
         path = Path(__file__).parents[1] / 'lewm_jax' / 'planner_lewm_control.py'
@@ -73,6 +86,21 @@ class ControllerTest(unittest.TestCase):
             None,
         )
         np.testing.assert_array_equal(mean, [[3.0, 4.0], [5.0, 6.0], [0.0, 0.0]])
+
+    def test_policy_random_mixture_builds_fresh_population_for_each_iteration(self):
+        controller = object.__new__(LeWMPPController)
+        controller.action_prior = FakePopulationPrior()
+        controller.action_prior_population_size = 4
+        controller.iterations = 2
+        controller.block_action_dim = 10
+        pixels = np.zeros((1, 4, 4, 3), dtype=np.uint8)
+
+        blocks = controller._action_prior_population(pixels, pixels, jax.random.PRNGKey(0))
+
+        self.assertEqual(blocks.shape, (2, 4, 10))
+        self.assertEqual(controller.action_prior.batch_size, 8)
+        np.testing.assert_array_equal(blocks[0].reshape(-1), np.arange(40, dtype=np.float32))
+        np.testing.assert_array_equal(blocks[1].reshape(-1), np.arange(40, 80, dtype=np.float32))
 
     def test_runtime_uses_consecutive_observation_history(self):
         generator = object.__new__(SubgoalGenerator)

@@ -97,7 +97,15 @@ class LeWMARXInferenceService:
         }
         result.update(self.checkpoint_paths)
         if self.policy_name == 'lewm':
-            result.update({'cem_horizon': 5, 'cem_receding_horizon': 5, 'action_block': 10})
+            result.update(
+                {
+                    'cem_horizon': 5,
+                    'cem_receding_horizon': 5,
+                    'action_block': 10,
+                    'cem_num_samples': 300,
+                    'cem_iterations': 30,
+                }
+            )
         else:
             result.update(
                 {
@@ -106,8 +114,18 @@ class LeWMARXInferenceService:
                     'action_block': 10,
                     'flow_sampling_steps': 16,
                     'action_prior': 'diffusion_policy' if self.policy_name == 'lewmdp' else 'action_chunk_prior',
+                    'cem_num_samples': 300,
+                    'cem_iterations': 2 if self.policy_name == 'lewmdp' else 5,
                 }
             )
+            if self.policy_name == 'lewmdp':
+                result.update(
+                    {
+                        'policy_guidance': 'policy_random_mixture',
+                        'action_prior_population_size': 285,
+                        'random_population_size': 15,
+                    }
+                )
         return result
 
     def _goal_changed(self, goal: np.ndarray) -> bool:
@@ -229,6 +247,7 @@ def create_service(args: argparse.Namespace) -> LeWMARXInferenceService:
             diffusion_policy_checkpoint=args.diffusion_policy_checkpoint,
             latent_path_flow_checkpoint=args.latent_path_flow_checkpoint,
             diffusion_device=args.diffusion_device,
+            diffusion_batch_size=args.diffusion_batch_size,
             seed=args.seed,
             input_color='bgr',
         )
@@ -255,14 +274,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--latent-path-flow-checkpoint', type=Path)
     parser.add_argument('--diffusion-policy-checkpoint', type=Path)
     parser.add_argument('--diffusion-device', default='cuda:0')
+    parser.add_argument('--diffusion-batch-size', type=int, default=32)
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--gpu', default='0')
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8765)
     parser.add_argument('--no-warmup', action='store_true')
     args = parser.parse_args()
-    if args.action_prior_step <= 0 or not 0 < args.port < 65536:
-        parser.error('--action-prior-step and --port must be positive')
+    if args.action_prior_step <= 0 or args.diffusion_batch_size <= 0 or not 0 < args.port < 65536:
+        parser.error('--action-prior-step, --diffusion-batch-size and --port must be positive')
     return args
 
 

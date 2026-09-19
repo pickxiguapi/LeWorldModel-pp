@@ -22,7 +22,7 @@ CAMERA_KEY = 'observation.images.camera_h'
 class DiffusionPolicyPrior:
     """Adapt a goal-conditioned LeRobot Diffusion Policy to LeWM CEM."""
 
-    def __init__(self, checkpoint, scaler, *, device='cuda:0', input_color='rgb'):
+    def __init__(self, checkpoint, scaler, *, device='cuda:0', input_color='rgb', inference_batch_size=32):
         import torch
         from gcdp_lerobot import load_goal_conditioned_diffusion_policy
         from lerobot.policies.factory import make_pre_post_processors
@@ -65,6 +65,9 @@ class DiffusionPolicyPrior:
         self.checkpoint = str(checkpoint)
         self.scaler = scaler
         self.input_color = input_color
+        self.inference_batch_size = int(inference_batch_size)
+        if self.inference_batch_size <= 0:
+            raise ValueError('Diffusion Policy inference batch size must be positive.')
         self.action_horizon = 10
         self.action_dim = int(scaler.action_dim)
         # Unlike the native Action Chunk Prior, this policy does not share or
@@ -100,10 +103,13 @@ class DiffusionPolicyPrior:
         return value
 
     def sample_actions(self, observations, goals, seed, temperature=0.0):
-        """Return one normalized 10-action block for LeWM's CEM mean."""
-        del observations, goals, temperature
+        """Return a population of normalized 10-action blocks for LeWM CEM."""
+        del temperature
         if self.goal is None or not self.history:
             raise RuntimeError('Install a goal and at least one observation before sampling the Diffusion Policy.')
+        sample_count = int(np.asarray(observations).shape[0])
+        if sample_count <= 0 or int(np.asarray(goals).shape[0]) != sample_count:
+            raise ValueError('Diffusion Policy observations and goals must have the same nonzero batch size.')
         history = list(self.history)
         history = [history[0]] * (3 - len(history)) + history
         images = self.torch.stack([*history, self.goal]).unsqueeze(0)
@@ -119,14 +125,18 @@ class DiffusionPolicyPrior:
             visual = batch[CAMERA_KEY].unsqueeze(2)
             from lerobot.utils.constants import OBS_IMAGES
 
-            actions = self.policy.diffusion.generate_actions({OBS_IMAGES: visual})
-            actions = self.postprocess(actions)
-        native = self.torch.as_tensor(actions).detach().cpu().numpy().astype(np.float32, copy=False)
-        expected = (1, self.action_horizon, self.action_dim)
+            chunks = []
+            for start in range(0, sample_count, self.inference_batch_size):
+                current = min(self.inference_batch_size, sample_count - start)
+                repeated_visual = visual.expand(current, *visual.shape[1:]).contiguous()
+                actions = self.policy.diffusion.generate_actions({OBS_IMAGES: repeated_visual})
+                chunks.append(self.torch.as_tensor(self.postprocess(actions)).detach().cpu())
+        native = self.torch.cat(chunks).numpy().astype(np.float32, copy=False)
+        expected = (sample_count, self.action_horizon, self.action_dim)
         if native.shape != expected or not np.isfinite(native).all():
             raise RuntimeError(f'Diffusion Policy returned {native.shape}, expected {expected} finite actions.')
-        normalized = self.scaler.transform(native[0]).astype(np.float32, copy=False)
-        return normalized.reshape(1, self.action_horizon * self.action_dim)
+        normalized = self.scaler.transform(native.reshape(-1, self.action_dim)).astype(np.float32, copy=False)
+        return normalized.reshape(sample_count, self.action_horizon * self.action_dim)
 
 
 class RealRobotLeWMDPPolicy(_RealRobotPolicyBase):
@@ -145,10 +155,12 @@ class RealRobotLeWMDPPolicy(_RealRobotPolicyBase):
         validation_fraction=0.04,
         split_seed=0,
         cem_num_samples=300,
-        cem_iterations=5,
+        cem_iterations=2,
         cem_topk=30,
         cem_var_scale=1.0,
         flow_sampling_steps=16,
+        action_prior_population_size=285,
+        diffusion_batch_size=32,
     ):
         from lewm_jax import checkpoint_image_shape
         from lewm_jax.planner_lewm_control import LeWMPPController
@@ -163,6 +175,7 @@ class RealRobotLeWMDPPolicy(_RealRobotPolicyBase):
             scaler,
             device=diffusion_device,
             input_color=input_color,
+            inference_batch_size=diffusion_batch_size,
         )
         controller = LeWMPPController(
             checkpoint=lewm_checkpoint,
@@ -177,7 +190,8 @@ class RealRobotLeWMDPPolicy(_RealRobotPolicyBase):
             var_scale=cem_var_scale,
             cost_mode='moh',
             action_prior=diffusion_prior,
-            action_prior_mode='policy_mode',
+            action_prior_mode='policy_random_mixture',
+            action_prior_population_size=action_prior_population_size,
             paired_plan_keys=True,
             action_low=action_low,
             action_high=action_high,
