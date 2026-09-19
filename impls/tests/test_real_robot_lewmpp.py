@@ -4,6 +4,7 @@ import numpy as np
 from eval_real_robot_lewm import RealRobotLeWMPolicy, extract_camera_frame
 from eval_real_robot_lewmdp import DiffusionPolicyPrior, RealRobotLeWMDPPolicy
 from eval_real_robot_lewmpp import RealRobotLeWMPPPolicy
+from gcdp_lerobot import DiffusionConfig, load_goal_conditioned_diffusion_config
 from real_robot_lewmpp import PUSH_MULTI_RED_CUBE_ACTION_NAMES, preprocess_robot_image
 
 
@@ -127,6 +128,15 @@ def test_lewmdp_uses_three_frames_and_returns_one_optimized_chunk():
 
 def test_diffusion_prior_seed_conversion_is_stable():
     assert DiffusionPolicyPrior._seed_value(np.asarray([1, 2], dtype=np.uint32)) == (1 << 32) ^ 2
+
+
+def test_legacy_diffusion_config_uses_vendored_goal_conditioned_type(tmp_path):
+    config_path = tmp_path / 'config.json'
+    config_path.write_text('{"type": "diffusion"}')
+
+    config = load_goal_conditioned_diffusion_config(config_path)
+
+    assert isinstance(config, DiffusionConfig)
 
 
 def test_real_robot_action_order_matches_lerobot_dataset():
