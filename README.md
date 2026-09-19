@@ -239,6 +239,43 @@ program must preserve the action order and dataset units and must still enforce
 collision checks, emergency stop handling, joint/velocity limits, the 20 Hz
 command rate, and all hardware-specific interlocks.
 
+#### Existing ARX client
+
+`scripts/eval_real_robot_server.py` implements the same `/health` and `/infer`
+protocol as the existing GC-DP server, so the ARX client does not need to be
+changed. Start the LeWM baseline server with:
+
+```bash
+PYTHONPATH=impls python scripts/eval_real_robot_server.py \
+  --policy=lewm \
+  --lance-path=outputs/data/push_multi_red_cube/push_multi_red_cube.lance \
+  --lewm-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack \
+  --gpu=0 \
+  --host=127.0.0.1 \
+  --port=8765
+```
+
+Start the LeWM++ server with:
+
+```bash
+PYTHONPATH=impls python scripts/eval_real_robot_server.py \
+  --policy=lewmpp \
+  --lance-path=outputs/data/push_multi_red_cube/push_multi_red_cube.lance \
+  --lewm-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack \
+  --action-prior-dir=outputs/train/lerobot_v3/push_multi_red_cube/action_prior \
+  --action-prior-step=100000 \
+  --latent-path-flow-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_50000.msgpack \
+  --gpu=0 \
+  --host=127.0.0.1 \
+  --port=8765
+```
+
+The server performs one warmup compilation before opening the port. It accepts
+the client's three BGR `480 x 640` history frames and PNG goal, and returns the
+same `10 x 14` JSON action array expected by the client. For compatibility, the
+health response retains the legacy `ddim_steps=20` field; LeWM does not use
+DDIM, and the response also identifies the actual policy and planner settings.
+
 ## Pretrained artifacts
 
 The exact checkpoints selected for the release evaluation are stored in
