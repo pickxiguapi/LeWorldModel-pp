@@ -24,7 +24,7 @@ class DiffusionPolicyPrior:
 
     def __init__(self, checkpoint, scaler, *, device='cuda:0', input_color='rgb'):
         import torch
-        from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+        from gcdp_lerobot import load_goal_conditioned_diffusion_policy
         from lerobot.policies.factory import make_pre_post_processors
 
         checkpoint = Path(checkpoint).expanduser().resolve()
@@ -32,7 +32,7 @@ class DiffusionPolicyPrior:
             raise FileNotFoundError(checkpoint)
         self.torch = torch
         self.device = torch.device(device)
-        self.policy = DiffusionPolicy.from_pretrained(str(checkpoint)).to(self.device).eval()
+        self.policy = load_goal_conditioned_diffusion_policy(checkpoint, self.device)
         config = self.policy.config
         expected = {
             'goal_conditioning': True,
