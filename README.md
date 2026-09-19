@@ -163,9 +163,9 @@ This is the offline real-robot-data training pipeline. The real-robot API below
 loads the Lance dataset only to restore the training action normalization and
 bounds; the latent cache is not needed for deployment.
 
-### Real-robot evaluation
+### Real-robot inference
 
-The two evaluation APIs accept either a raw `camera_h` frame or an observation
+The two inference APIs accept either a raw `camera_h` frame or an observation
 dictionary containing `camera_h` or `observation.images.camera_h`. Both apply
 the same RGB conversion and 480 x 640 to 168 x 224 long-edge resize used in
 training and return actions in the original 14-dimensional robot units.
