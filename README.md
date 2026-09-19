@@ -156,7 +156,7 @@ outputs/
     ├── lewm/weights_epoch_50.msgpack
     ├── lewm_latents.h5
     ├── action_prior/params_100000.pkl
-    └── latent_path_flow/checkpoint_50000.msgpack
+    └── latent_path_flow/checkpoint_050000.msgpack
 ```
 
 This is the offline real-robot-data training pipeline. The real-robot API below
@@ -195,7 +195,7 @@ policy = RealRobotLeWMPPPolicy(
     lewm_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack",
     action_prior_dir="outputs/train/lerobot_v3/push_multi_red_cube/action_prior",
     action_prior_step=100000,
-    latent_path_flow_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_50000.msgpack",
+    latent_path_flow_checkpoint="outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_050000.msgpack",
     input_color="rgb",
 )
 
@@ -264,7 +264,7 @@ PYTHONPATH=impls python scripts/eval_real_robot_server.py \
   --lewm-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/lewm/weights_epoch_50.msgpack \
   --action-prior-dir=outputs/train/lerobot_v3/push_multi_red_cube/action_prior \
   --action-prior-step=100000 \
-  --latent-path-flow-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_50000.msgpack \
+  --latent-path-flow-checkpoint=outputs/train/lerobot_v3/push_multi_red_cube/latent_path_flow/checkpoint_050000.msgpack \
   --gpu=0 \
   --host=127.0.0.1 \
   --port=8765

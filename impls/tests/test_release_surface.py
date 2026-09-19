@@ -157,7 +157,7 @@ def test_lerobot_v3_robot_api_is_documented_with_final_checkpoints():
     for value in (
         'weights_epoch_50.msgpack',
         'action_prior_step=100000',
-        'checkpoint_50000.msgpack',
+        'checkpoint_050000.msgpack',
         'plan_action_chunk(recent_frames, goal_image)',
         'policy.act(frame)',
         'left_joint_0',
