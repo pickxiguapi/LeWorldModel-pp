@@ -22,6 +22,7 @@ from lerobot.optim.optimizers import AdamConfig
 from lerobot.optim.schedulers import DiffuserSchedulerConfig
 
 
+@PreTrainedConfig.register_subclass("gcdp_diffusion")
 @dataclass
 class DiffusionConfig(PreTrainedConfig):
     """Configuration class for DiffusionPolicy.

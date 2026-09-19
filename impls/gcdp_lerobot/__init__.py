@@ -12,9 +12,30 @@ import tempfile
 from pathlib import Path
 
 import draccus
+from lerobot.configs.policies import PreTrainedConfig
 
 from gcdp_lerobot.configuration_diffusion import DiffusionConfig
 from gcdp_lerobot.modeling_diffusion import DiffusionPolicy
+
+
+def load_goal_conditioned_diffusion_config(config_path):
+    """Parse the legacy GC-DP config through an isolated registry name."""
+    config_path = Path(config_path).expanduser().resolve()
+    raw = json.loads(config_path.read_text())
+    if raw.get('type') != 'diffusion':
+        raise ValueError(f'Expected a Diffusion Policy config at {config_path}.')
+
+    # ``diffusion`` is already registered by the installed LeRobot version.
+    # Route only this checkpoint config to the vendored GC-DP implementation.
+    raw['type'] = 'gcdp_diffusion'
+    with tempfile.NamedTemporaryFile('w', suffix='.json') as file:
+        json.dump(raw, file)
+        file.flush()
+        with draccus.config_type('json'):
+            config = draccus.parse(PreTrainedConfig, file.name, args=[])
+    if not isinstance(config, DiffusionConfig):
+        raise TypeError(f'Unexpected Diffusion Policy config type: {type(config)!r}.')
+    return config
 
 
 def load_goal_conditioned_diffusion_policy(checkpoint, device):
@@ -23,14 +44,7 @@ def load_goal_conditioned_diffusion_policy(checkpoint, device):
     config_path = checkpoint / 'config.json'
     if not config_path.is_file():
         raise FileNotFoundError(config_path)
-    raw = json.loads(config_path.read_text())
-    if raw.pop('type', None) != 'diffusion':
-        raise ValueError(f'Expected a Diffusion Policy config at {config_path}.')
-    with tempfile.NamedTemporaryFile('w', suffix='.json') as file:
-        json.dump(raw, file)
-        file.flush()
-        with draccus.config_type('json'):
-            config = draccus.parse(DiffusionConfig, file.name, args=[])
+    config = load_goal_conditioned_diffusion_config(config_path)
     config.device = str(device)
     return DiffusionPolicy.from_pretrained(
         str(checkpoint),
@@ -39,4 +53,9 @@ def load_goal_conditioned_diffusion_policy(checkpoint, device):
     ).to(device).eval()
 
 
-__all__ = ['DiffusionConfig', 'DiffusionPolicy', 'load_goal_conditioned_diffusion_policy']
+__all__ = [
+    'DiffusionConfig',
+    'DiffusionPolicy',
+    'load_goal_conditioned_diffusion_config',
+    'load_goal_conditioned_diffusion_policy',
+]
